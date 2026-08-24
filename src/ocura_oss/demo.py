@@ -23,12 +23,16 @@ class DemoError(Exception):
 
 @dataclass(frozen=True)
 class DemoStep:
+    """One completed stage in a demonstration report."""
+
     step: str
     detail: str
 
 
 @dataclass(frozen=True)
 class DemoReport:
+    """Retained demonstration location, completed stages, and comparison."""
+
     root: Path
     steps: tuple[DemoStep, ...]
     comparison: model.ComparisonResult

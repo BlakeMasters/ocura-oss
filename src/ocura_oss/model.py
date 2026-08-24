@@ -34,6 +34,8 @@ class ValidationError(ModelError):
 
 
 class Outcome(enum.StrEnum):
+    """Terminal outcome recorded for one command attempt."""
+
     PASSED = "passed"
     FAILED = "failed"
     LAUNCH_FAILED = "launch_failed"
@@ -41,6 +43,8 @@ class Outcome(enum.StrEnum):
 
 
 class ComparisonState(enum.StrEnum):
+    """Evidence completeness reported by a branch comparison."""
+
     NO_BRANCH = "no_branch"
     PARTIAL = "partial"
     READY = "ready"
@@ -215,6 +219,8 @@ def parameter_delta(
 
 @dataclass(frozen=True)
 class Den:
+    """Project-local state identity and default pathway."""
+
     id: str
     name: str
     created_at: str
@@ -223,6 +229,8 @@ class Den:
 
 @dataclass(frozen=True)
 class Pathway:
+    """One lineage of declared parameters and recorded evidence."""
+
     id: str
     den_id: str
     created_at: str
@@ -234,6 +242,8 @@ class Pathway:
 
 @dataclass(frozen=True)
 class Atom:
+    """One recorded command attempt and its referenced output logs."""
+
     id: str
     pathway_id: str
     started_at: str
@@ -254,6 +264,8 @@ class Atom:
 
 @dataclass(frozen=True)
 class Chokepoint:
+    """Terminal evidence boundary that can serve as a branch source."""
+
     id: str
     pathway_id: str
     atom_id: str
@@ -464,6 +476,8 @@ def chokepoint_from_payload(payload: object) -> Chokepoint:
 
 @dataclass(frozen=True)
 class RunSummary:
+    """Command outcome fields used in comparisons and public summaries."""
+
     id: str
     pathway_id: str
     outcome: Outcome
@@ -537,6 +551,8 @@ class ChokepointSummary:
 
 @dataclass(frozen=True)
 class ParameterDelta:
+    """Inherited, added, and changed declared parameters."""
+
     inherited: Mapping[str, str]
     added: Mapping[str, str]
     changed: Mapping[str, Mapping[str, str]]
@@ -563,6 +579,8 @@ class ParameterDelta:
 
 @dataclass(frozen=True)
 class ChildComparison:
+    """Comparison of one child pathway with its source run."""
+
     pathway_id: str
     reason: str
     source_chokepoint_id: str
@@ -587,6 +605,8 @@ class ChildComparison:
 
 @dataclass(frozen=True)
 class ComparisonResult:
+    """Comparison state and every child associated with a source chokepoint."""
+
     state: ComparisonState
     source_chokepoint_id: str
     source_pathway_id: str

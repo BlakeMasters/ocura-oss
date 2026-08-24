@@ -211,6 +211,16 @@ class RunnerTests(unittest.TestCase):
                 )
         self.assertEqual(self.store.list_atoms(), [])
 
+    def test_string_argv_is_rejected_instead_of_split_into_characters(self):
+        with self.assertRaisesRegex(StoreError, "argument tokens"):
+            runner.run_command(
+                self.store,
+                pathway_id=self.pathway.id,
+                argv="python -V",
+                declared_parameters={},
+            )
+        self.assertEqual(self.store.list_atoms(), [])
+
     def test_parameter_values_may_contain_equals_signs(self):
         execution = runner.run_command(
             self.store,
@@ -367,7 +377,7 @@ class InterruptedEvidenceTests(unittest.TestCase):
             stdout_sha256=digest,
             stderr_sha256=digest,
         )
-        self.store.save_atom(valid)
+        self.store._save_atom(valid)
         loaded = self.store.load_atom(atom_id)
         self.assertIs(loaded.outcome, model.Outcome.INTERRUPTED)
 

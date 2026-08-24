@@ -27,6 +27,22 @@ Ocura OSS requires Python 3.11 or later and uses only the standard library at ru
 
 The demo creates a new directory, runs a baseline command, creates a chokepoint, branches with a reason and parameter override, reruns on the child pathway, verifies all records and referenced logs, and prints a comparison. It returns exit code 2 if the destination already exists; the directory is kept for inspection either way.
 
+## Python API
+
+The provisional Python API supports the same workflow and provides typed access to records and verification reports.
+
+```python
+import sys
+
+from ocura_oss import initialize, run, verify
+
+initial = initialize("experiment", name="example")
+execution = run([sys.executable, "script.py"], root=initial.root)
+assert verify(initial.root).ok
+```
+
+See the [Python API](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/python-api.md) and [state and verification](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/state-and-verification.md) references. Names listed in `ocura_oss.__all__` form the documented surface during the 0.x series; other names are implementation details.
+
 ## Direct use
 
 ```console
@@ -70,7 +86,7 @@ Commands run directly on your machine with `shell=False` and inherit the invokin
 
 ## Status
 
-Ocura OSS is research software. Production support is outside the 0.1 scope, and the interface and record format may change before 1.0. The source code and tests are licensed under the [Mozilla Public License 2.0](https://github.com/BlakeMasters/ocura-oss/blob/main/LICENSE).
+Ocura OSS is research software. The 0.x series does not include a production support commitment, and the interface and record format may change before 1.0. The source code and tests are licensed under the [Mozilla Public License 2.0](https://github.com/BlakeMasters/ocura-oss/blob/main/LICENSE).
 
 ## Contributing
 
