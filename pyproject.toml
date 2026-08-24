@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ocura-oss"
-version = "0.1.1"
+version = "0.2.0"
 description = "A research package for integrity-checked, branchable records of local command execution."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -27,6 +27,7 @@ Homepage = "https://github.com/BlakeMasters/ocura-oss"
 Repository = "https://github.com/BlakeMasters/ocura-oss"
 Issues = "https://github.com/BlakeMasters/ocura-oss/issues"
 Changelog = "https://github.com/BlakeMasters/ocura-oss/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/BlakeMasters/ocura-oss/blob/main/docs/index.md"
 Security = "https://github.com/BlakeMasters/ocura-oss/blob/main/SECURITY.md"
 
 [project.scripts]
@@ -34,6 +35,9 @@ ocura-oss = "ocura_oss.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+ocura_oss = ["py.typed"]
 
 [tool.ruff]
 line-length = 100

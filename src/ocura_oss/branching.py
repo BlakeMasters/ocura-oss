@@ -65,7 +65,7 @@ def create_child_pathway(
         reason=text,
         parameters=effective,
     )
-    store.save_pathway(child)
+    store._save_pathway(child)
     return child
 
 

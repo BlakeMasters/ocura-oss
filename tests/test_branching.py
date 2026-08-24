@@ -58,7 +58,7 @@ class BranchSourceTests(unittest.TestCase):
 
     def test_nonterminal_source_is_rejected(self):
         identifier = model.make_id("chokepoint")
-        self.store.save_chokepoint(
+        self.store._save_chokepoint(
             model.Chokepoint(
                 id=identifier,
                 pathway_id=self.pathway.id,
@@ -74,7 +74,7 @@ class BranchSourceTests(unittest.TestCase):
 
     def test_nonbranchable_source_is_rejected(self):
         identifier = model.make_id("chokepoint")
-        self.store.save_chokepoint(
+        self.store._save_chokepoint(
             model.Chokepoint(
                 id=identifier,
                 pathway_id=self.pathway.id,
@@ -282,7 +282,7 @@ class CompareTests(unittest.TestCase):
     def test_automatic_selection_refuses_broken_references_anywhere(self):
         (_chokepoint, _atom, _pathway), _execution = self._source()
         ghost_atom = model.make_id("atom")
-        self.store.save_chokepoint(
+        self.store._save_chokepoint(
             model.Chokepoint(
                 id=model.make_id("chokepoint"),
                 pathway_id=self.pathway.id,
@@ -303,7 +303,7 @@ class CompareTests(unittest.TestCase):
         empty_digest = hashlib.sha256(b"").hexdigest()
         for suffix in ("stdout", "stderr"):
             (self.store.logs_dir / f"{atom_id}.{suffix}.log").write_bytes(b"")
-        self.store.save_atom(
+        self.store._save_atom(
             model.Atom(
                 id=atom_id,
                 pathway_id=ghost_pathway,

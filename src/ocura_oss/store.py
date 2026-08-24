@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import contextlib
-import datetime
 import hashlib
 import json
 import os
@@ -13,7 +12,7 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 from ocura_oss import model
 
@@ -44,16 +43,23 @@ class StoreError(Exception):
     """State, schema, or integrity failure. The CLI maps this to exit code 2."""
 
 
-def resolve_root(root: os.PathLike | str | None = None) -> Path:
+def resolve_root(root: os.PathLike[str] | str | None = None) -> Path:
     """Resolve the project root without changing the process working directory."""
     base = Path(root).expanduser() if root else Path.cwd()
     return base.resolve()
 
 
 class Store:
-    def __init__(self, root: Path) -> None:
-        self.root = root
-        self.state_dir = root / STATE_DIR_NAME
+    """Read and verify Ocura OSS state under one project root.
+
+    The documented loading, listing, initialization, and verification methods
+    form the provisional low-level API. Record writing remains internal to the
+    package workflows.
+    """
+
+    def __init__(self, root: os.PathLike[str] | str | None = None) -> None:
+        self.root = resolve_root(root)
+        self.state_dir = self.root / STATE_DIR_NAME
         self.pathways_dir = self.state_dir / "pathways"
         self.atoms_dir = self.state_dir / "atoms"
         self.chokepoints_dir = self.state_dir / "chokepoints"
@@ -61,26 +67,33 @@ class Store:
         self.den_path = self.state_dir / "den.json"
 
     def exists(self) -> bool:
+        """Return whether the state directory exists."""
         return self.state_dir.exists()
 
     def require(self) -> None:
+        """Require an initialized den under this project root."""
         if not self.den_path.is_file():
             raise StoreError(f"no Ocura OSS state found under {self.root}")
 
     def load_den(self) -> model.Den:
+        """Load and validate the den record."""
         payload = self._read_envelope(self.den_path, "den")
         try:
             return model.den_from_payload(payload)
         except model.ValidationError as exc:
             raise StoreError(f"invalid den record den.json: {exc}") from exc
 
-    def load_pathway(self, pathway_id: str, _seen: frozenset[str] = frozenset()) -> model.Pathway:
+    def load_pathway(self, pathway_id: str) -> model.Pathway:
+        """Load a pathway and validate its den and lineage references."""
+        return self._load_pathway(pathway_id, frozenset())
+
+    def _load_pathway(self, pathway_id: str, seen_ids: frozenset[str]) -> model.Pathway:
         pathway = self._load_structural(
             "pathways", pathway_id, "pathway", "pathway", model.pathway_from_payload
         )
-        if pathway_id in _seen:
+        if pathway_id in seen_ids:
             raise StoreError("cyclic lineage reference in state records")
-        seen = _seen | {pathway_id}
+        seen = seen_ids | {pathway_id}
         den = self.load_den()
         if pathway.den_id != den.id:
             raise StoreError(f"pathway {pathway_id} references an unknown den")
@@ -89,9 +102,9 @@ class Store:
                 f"pathway {pathway_id} must set parent pathway and source chokepoint together"
             )
         if pathway.parent_pathway_id is not None:
-            self.load_pathway(pathway.parent_pathway_id, seen)
+            self._load_pathway(pathway.parent_pathway_id, seen)
         if pathway.source_chokepoint_id is not None:
-            source = self.load_chokepoint(pathway.source_chokepoint_id, seen)
+            source = self._load_chokepoint(pathway.source_chokepoint_id, seen)
             if (
                 pathway.parent_pathway_id is not None
                 and source.pathway_id != pathway.parent_pathway_id
@@ -101,16 +114,22 @@ class Store:
                 )
         return pathway
 
-    def load_atom(self, atom_id: str, _seen: frozenset[str] = frozenset()) -> model.Atom:
+    def load_atom(self, atom_id: str) -> model.Atom:
+        """Load an atom and validate its pathway reference."""
+        return self._load_atom(atom_id, frozenset())
+
+    def _load_atom(self, atom_id: str, seen_ids: frozenset[str]) -> model.Atom:
         atom = self._load_structural("atoms", atom_id, "atom", "atom", model.atom_from_payload)
-        if atom_id in _seen:
+        if atom_id in seen_ids:
             raise StoreError("cyclic lineage reference in state records")
-        self.load_pathway(atom.pathway_id, _seen | {atom_id})
+        self._load_pathway(atom.pathway_id, seen_ids | {atom_id})
         return atom
 
-    def load_chokepoint(
-        self, chokepoint_id: str, _seen: frozenset[str] = frozenset()
-    ) -> model.Chokepoint:
+    def load_chokepoint(self, chokepoint_id: str) -> model.Chokepoint:
+        """Load a chokepoint and validate its atom, pathway, and outcome."""
+        return self._load_chokepoint(chokepoint_id, frozenset())
+
+    def _load_chokepoint(self, chokepoint_id: str, seen_ids: frozenset[str]) -> model.Chokepoint:
         chokepoint = self._load_structural(
             "chokepoints",
             chokepoint_id,
@@ -118,42 +137,45 @@ class Store:
             "chokepoint",
             model.chokepoint_from_payload,
         )
-        if chokepoint_id in _seen:
+        if chokepoint_id in seen_ids:
             raise StoreError("cyclic lineage reference in state records")
-        seen = _seen | {chokepoint_id}
-        atom = self.load_atom(chokepoint.atom_id, seen)
+        seen = seen_ids | {chokepoint_id}
+        atom = self._load_atom(chokepoint.atom_id, seen)
         if atom.pathway_id != chokepoint.pathway_id:
             raise StoreError(f"chokepoint {chokepoint_id} and its atom disagree on the pathway")
         if atom.outcome is not chokepoint.outcome:
             raise StoreError(f"chokepoint {chokepoint_id} outcome disagrees with its atom")
         return chokepoint
 
-    def save_den(self, den: model.Den) -> None:
+    def _save_den(self, den: model.Den) -> None:
         self._write_record(self.den_path, "den", model.den_to_payload(den))
 
-    def save_pathway(self, pathway: model.Pathway) -> None:
+    def _save_pathway(self, pathway: model.Pathway) -> None:
         path = self._record_path(self.pathways_dir, pathway.id, "pathway")
         self._write_record(path, "pathway", model.pathway_to_payload(pathway))
 
-    def save_atom(self, atom: model.Atom) -> None:
+    def _save_atom(self, atom: model.Atom) -> None:
         path = self._record_path(self.atoms_dir, atom.id, "atom")
         self._write_record(path, "atom", model.atom_to_payload(atom))
 
-    def save_chokepoint(self, chokepoint: model.Chokepoint) -> None:
+    def _save_chokepoint(self, chokepoint: model.Chokepoint) -> None:
         path = self._record_path(self.chokepoints_dir, chokepoint.id, "chokepoint")
         self._write_record(path, "chokepoint", model.chokepoint_to_payload(chokepoint))
 
     def list_pathways(self) -> list[model.Pathway]:
+        """Return validated pathways in creation order."""
         records = self._list_typed(self.pathways_dir, "pathway", model.pathway_from_payload)
         records.sort(key=lambda item: (item.created_at, item.id))
         return records
 
     def list_atoms(self) -> list[model.Atom]:
+        """Return validated atoms in start order."""
         records = self._list_typed(self.atoms_dir, "atom", model.atom_from_payload)
         records.sort(key=lambda item: (item.started_at, item.id))
         return records
 
     def list_chokepoints(self) -> list[model.Chokepoint]:
+        """Return validated chokepoints in reverse creation order."""
         records = self._list_typed(
             self.chokepoints_dir, "chokepoint", model.chokepoint_from_payload
         )
@@ -161,6 +183,7 @@ class Store:
         return records
 
     def has_terminal_evidence(self, pathway_id: str) -> bool:
+        """Return whether an atom is recorded on a pathway."""
         return any(atom.pathway_id == pathway_id for atom in self.list_atoms())
 
     def verify_atom_evidence(self, atom: model.Atom) -> None:
@@ -175,6 +198,20 @@ class Store:
             (atom.stderr_log, atom.stderr_bytes, atom.stderr_sha256),
         ):
             self._verify_log(atom.id, relative, recorded_size, recorded_digest)
+
+    def resolve_log_path(self, atom: model.Atom, stream: Literal["stdout", "stderr"]) -> Path:
+        """Resolve one recorded log path after containment checks.
+
+        Call :meth:`verify_atom_evidence` first when the log's recorded size and
+        digest must also be checked.
+        """
+        if stream == "stdout":
+            relative = atom.stdout_log
+        elif stream == "stderr":
+            relative = atom.stderr_log
+        else:
+            raise StoreError("log stream must be 'stdout' or 'stderr'")
+        return self._evidence_path(atom.id, relative)
 
     def _verify_log(
         self, atom_id: str, relative: str, recorded_size: int, recorded_digest: str
@@ -254,22 +291,18 @@ class Store:
         self,
         *,
         name: str,
-        now: Callable[[], datetime.datetime] | None = None,
-        new_id: Callable[[str], str] | None = None,
     ) -> tuple[model.Den, model.Pathway]:
         """Create one den and one default pathway; fail if state already exists."""
         if self.exists():
             raise StoreError(f"cannot initialize: state directory already exists: {self.state_dir}")
         if not isinstance(name, str) or not name.strip():
             raise StoreError("den name must not be blank")
-        clock = now or model.utc_now
-        identifier = new_id or model.make_id
-        created_at = model.format_timestamp(clock())
+        created_at = model.format_timestamp(model.utc_now())
         den = model.Den(
-            id=identifier("den"),
+            id=model.make_id("den"),
             name=name,
             created_at=created_at,
-            default_pathway_id=identifier("pathway"),
+            default_pathway_id=model.make_id("pathway"),
         )
         pathway = model.Pathway(
             id=den.default_pathway_id,
@@ -288,8 +321,8 @@ class Store:
             self.logs_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
-        self.save_den(den)
-        self.save_pathway(pathway)
+        self._save_den(den)
+        self._save_pathway(pathway)
         return den, pathway
 
     def _dir_for(self, subdir: str) -> Path:

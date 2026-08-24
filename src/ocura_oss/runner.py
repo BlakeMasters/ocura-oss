@@ -33,6 +33,8 @@ _LAUNCH_CATEGORIES: tuple[tuple[type[BaseException], str], ...] = (
 
 @dataclass(frozen=True)
 class RunExecution:
+    """Atom and terminal chokepoint produced by one command attempt."""
+
     atom: model.Atom
     chokepoint: model.Chokepoint
 
@@ -67,6 +69,8 @@ def run_command(
     """
     clock = now or model.utc_now
     counter = monotonic or time.monotonic
+    if isinstance(argv, (str, bytes)):
+        raise StoreError("command must be a sequence of argument tokens, not a string")
     tokens = tuple(argv)
     if not tokens or not all(isinstance(token, str) and token for token in tokens):
         raise StoreError("command must be a nonempty sequence of nonempty strings")
@@ -132,7 +136,7 @@ def run_command(
         stdout_sha256=stdout_digest,
         stderr_sha256=stderr_digest,
     )
-    store.save_atom(atom)
+    store._save_atom(atom)
     chokepoint = model.Chokepoint(
         id=chokepoint_id,
         pathway_id=pathway.id,
@@ -142,7 +146,7 @@ def run_command(
         outcome=outcome,
         branchable=True,
     )
-    store.save_chokepoint(chokepoint)
+    store._save_chokepoint(chokepoint)
     return RunExecution(atom=atom, chokepoint=chokepoint)
 
 

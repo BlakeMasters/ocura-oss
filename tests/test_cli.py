@@ -694,7 +694,7 @@ class CliTests(unittest.TestCase):
         atom_id = model.make_id("atom")
         for suffix in ("stdout", "stderr"):
             (store.logs_dir / f"{atom_id}.{suffix}.log").write_bytes(b"")
-        store.save_atom(
+        store._save_atom(
             model.Atom(
                 id=atom_id,
                 pathway_id="pathway-" + "f" * 32,

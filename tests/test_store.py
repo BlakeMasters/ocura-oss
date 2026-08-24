@@ -166,7 +166,7 @@ class ListingTests(unittest.TestCase):
             for index in range(3):
                 identifier = model.make_id("pathway")
                 ids.append(identifier)
-                store.save_pathway(
+                store._save_pathway(
                     model.Pathway(
                         id=identifier,
                         den_id=den.id,
@@ -186,7 +186,7 @@ class ListingTests(unittest.TestCase):
         with temp_root() as root:
             store = new_store(root)
             good = model.make_id("chokepoint")
-            store.save_chokepoint(
+            store._save_chokepoint(
                 model.Chokepoint(
                     id=good,
                     pathway_id=store.load_den().default_pathway_id,
@@ -399,7 +399,7 @@ class LineageIntegrityTests(unittest.TestCase):
         self.empty_digest = hashlib.sha256(b"").hexdigest()
 
     def _save_atom(self, atom_id, pathway_id):
-        self.store.save_atom(
+        self.store._save_atom(
             model.Atom(
                 id=atom_id,
                 pathway_id=pathway_id,
@@ -424,7 +424,7 @@ class LineageIntegrityTests(unittest.TestCase):
         atom_id = model.make_id("atom")
         chokepoint_id = model.make_id("chokepoint")
         self._save_atom(atom_id, self.pathway_id)
-        self.store.save_chokepoint(
+        self.store._save_chokepoint(
             model.Chokepoint(
                 id=chokepoint_id,
                 pathway_id=self.pathway_id,
@@ -447,7 +447,7 @@ class LineageIntegrityTests(unittest.TestCase):
 
     def test_chokepoint_atom_pathway_disagreement_is_rejected(self):
         other = model.make_id("pathway")
-        self.store.save_pathway(
+        self.store._save_pathway(
             model.Pathway(
                 id=other,
                 den_id=self.store.load_den().id,
@@ -461,7 +461,7 @@ class LineageIntegrityTests(unittest.TestCase):
         atom_id = model.make_id("atom")
         self._save_atom(atom_id, other)
         chokepoint_id = model.make_id("chokepoint")
-        self.store.save_chokepoint(
+        self.store._save_chokepoint(
             model.Chokepoint(
                 id=chokepoint_id,
                 pathway_id=self.pathway_id,
@@ -485,7 +485,7 @@ class TieBreakTests(unittest.TestCase):
             second = "chokepoint-" + "0" * 31 + "b"
             created = "2026-01-01T00:00:00.000000+00:00"
             for identifier in (first, second):
-                store.save_chokepoint(
+                store._save_chokepoint(
                     model.Chokepoint(
                         id=identifier,
                         pathway_id=pathway_id,
@@ -572,7 +572,7 @@ class EvidenceVerificationTests(unittest.TestCase):
                     stdout_sha256=self.empty_digest,
                     stderr_sha256=self.empty_digest,
                 )
-                self.store.save_atom(atom)
+                self.store._save_atom(atom)
                 with self.assertRaises(StoreError):
                     self.store.verify_atom_evidence(atom)
 
@@ -685,7 +685,7 @@ class SemanticInvariantTests(unittest.TestCase):
             stdout_sha256=self.empty_digest,
             stderr_sha256=self.empty_digest,
         )
-        self.store.save_atom(atom)
+        self.store._save_atom(atom)
         return atom
 
     def _craft_chokepoint(self, atom_id, outcome=model.Outcome.PASSED):
@@ -698,7 +698,7 @@ class SemanticInvariantTests(unittest.TestCase):
             outcome=outcome,
             branchable=True,
         )
-        self.store.save_chokepoint(chokepoint)
+        self.store._save_chokepoint(chokepoint)
         return chokepoint
 
     def test_atom_with_nonexistent_pathway_fails_verification(self):
@@ -746,7 +746,7 @@ class SemanticInvariantTests(unittest.TestCase):
             reason="legitimate branch",
             parameters={},
         )
-        self.store.save_pathway(legitimate)
+        self.store._save_pathway(legitimate)
         swapped = model.Pathway(
             id=model.make_id("pathway"),
             den_id=self.den_id,
@@ -756,7 +756,7 @@ class SemanticInvariantTests(unittest.TestCase):
             reason="source belongs to grandparent, not parent",
             parameters={},
         )
-        self.store.save_pathway(swapped)
+        self.store._save_pathway(swapped)
         with self.assertRaises(StoreError):
             self.store.load_pathway(swapped.id)
 
