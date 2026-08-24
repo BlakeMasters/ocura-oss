@@ -19,7 +19,7 @@ While a command runs, its output streams to your terminal and is recorded under 
 
 ## Requirements and install
 
-Ocura OSS requires Python 3.11 or later and uses only the standard library at runtime. Until a package index release is available, install from a source checkout with `pip install .`.
+Ocura OSS requires Python 3.11 or later and uses only the standard library at runtime. Install it from PyPI with `python -m pip install ocura-oss`.
 
 ## Quick start
 
