@@ -72,12 +72,12 @@ def create_child_pathway(
 def select_source_chokepoint(
     store: Store,
 ) -> tuple[model.Chokepoint, model.Atom, model.Pathway]:
-    """Choose the newest branchable chokepoint under a global fail-closed policy.
+    """Choose the newest branched source under a global fail-closed policy.
 
     The entire state is verified first: any malformed record, broken
     reference, unverified log, or orphaned file anywhere under the state
-    directory prevents automatic selection instead of allowing a fallback to
-    older evidence.
+    directory prevents automatic selection. When the state has no child
+    pathways, the newest terminal chokepoint preserves the ``no_branch`` view.
     """
     report = store.verify_state()
     if not report.ok:
@@ -88,8 +88,16 @@ def select_source_chokepoint(
     chokepoints = store.list_chokepoints()
     if not chokepoints:
         raise StoreError("no branchable chokepoint found")
-    newest = chokepoints[0]
-    return load_verified_source(store, newest.id)
+    branched_sources = {
+        pathway.source_chokepoint_id
+        for pathway in store.list_pathways()
+        if pathway.source_chokepoint_id is not None
+    }
+    selected = next(
+        (chokepoint for chokepoint in chokepoints if chokepoint.id in branched_sources),
+        chokepoints[0],
+    )
+    return load_verified_source(store, selected.id)
 
 
 def compare(store: Store, chokepoint_id: str | None = None) -> model.ComparisonResult:

@@ -2,7 +2,7 @@
 
 """Public Python interface for Ocura OSS."""
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 from ocura_oss.api import Initialization, branch, compare, initialize, run, run_demo, verify
 from ocura_oss.demo import DemoError, DemoReport, DemoStep

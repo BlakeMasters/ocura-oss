@@ -88,8 +88,9 @@ def branch(
 def compare(source_chokepoint_id: str | None = None, *, root: _Root = None) -> ComparisonResult:
     """Compare a verified source run with child pathway evidence.
 
-    Omitting *source_chokepoint_id* selects the newest branchable chokepoint
-    only after the complete state passes verification.
+    Omitting *source_chokepoint_id* selects the newest chokepoint referenced by
+    a child pathway after the complete state passes verification. A state with
+    no child pathways selects its newest terminal chokepoint.
     """
     store = _required_store(root)
     return branching.compare(store, source_chokepoint_id)

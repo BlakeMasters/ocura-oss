@@ -260,17 +260,16 @@ class Store:
                 self.load_atom(atom.id)
             except StoreError as exc:
                 problems.append((f"{atom.id}.json", str(exc)))
-            referenced: list[Path] = []
             for relative, size_field, digest_field in (
                 (atom.stdout_log, atom.stdout_bytes, atom.stdout_sha256),
                 (atom.stderr_log, atom.stderr_bytes, atom.stderr_sha256),
             ):
                 try:
-                    referenced.append(self._verify_log(atom.id, relative, size_field, digest_field))
+                    referenced_logs.add(self._evidence_path(atom.id, relative))
+                    self._verify_log(atom.id, relative, size_field, digest_field)
                     logs_checked += 1
                 except StoreError as exc:
                     problems.append((f"{atom.id}.json", str(exc)))
-            referenced_logs.update(referenced)
         self._scan_orphaned_logs(referenced_logs, problems)
         for chokepoint in chokepoints:
             try:

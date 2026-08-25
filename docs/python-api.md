@@ -93,7 +93,7 @@ Verifies the selected chokepoint, source atom, pathway, and referenced logs befo
 compare(source_chokepoint_id=None, *, root=None) -> ComparisonResult
 ```
 
-Compares a verified source atom with every child pathway created from its chokepoint. An explicit ID performs targeted source verification. When the ID is omitted, automatic selection verifies the complete state before choosing the newest branchable chokepoint.
+Compares a verified source atom with every child pathway created from its chokepoint. An explicit ID performs targeted source verification. When the ID is omitted, automatic selection verifies the complete state and chooses the newest chokepoint referenced by a child pathway. A state with no child pathways uses its newest terminal chokepoint and reports `no_branch`.
 
 The result state is `no_branch`, `partial`, or `ready`. Comparison reads recorded evidence and never reruns a command.
 

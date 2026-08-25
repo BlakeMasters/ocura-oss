@@ -584,6 +584,27 @@ class EvidenceVerificationTests(unittest.TestCase):
         self.assertEqual(report.atoms, 1)
         self.assertEqual(report.logs_checked, 1)
 
+    def test_verify_state_keeps_checksum_mismatch_out_of_orphan_report(self):
+        execution = self._run_once()
+        log = self.store.logs_dir / f"{execution.atom.id}.stdout.log"
+        contents = bytearray(log.read_bytes())
+        contents[0] ^= 0x20
+        log.write_bytes(contents)
+
+        report = self.store.verify_state()
+
+        self.assertFalse(report.ok)
+        self.assertEqual(report.logs_checked, 1)
+        self.assertTrue(
+            any("log checksum mismatch" in problem for _record, problem in report.problems)
+        )
+        self.assertFalse(
+            any(
+                record == f"logs/{log.name}" and "orphaned" in problem
+                for record, problem in report.problems
+            )
+        )
+
     def test_verify_state_detects_orphaned_log_files(self):
         self._run_once()
         orphan = self.store.logs_dir / "orphaned.stdout.log"
