@@ -41,7 +41,7 @@ execution = run([sys.executable, "script.py"], root=initial.root)
 assert verify(initial.root).ok
 ```
 
-See the [Python API](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/python-api.md) and [state and verification](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/state-and-verification.md) references. Names listed in `ocura_oss.__all__` form the documented surface during the 0.x series; other names are implementation details.
+Reference documentation is published at [ocuna-ai.com/docs](https://ocuna-ai.com/docs). Use the [CLI reference](https://ocuna-ai.com/docs/cli) for commands and exit semantics and the [Python API reference](https://ocuna-ai.com/docs/api) for functions, parameters, return types, records, and exceptions. Names listed in `ocura_oss.__all__` form the documented surface during the 0.x series; other names are implementation details.
 
 ## Direct use
 

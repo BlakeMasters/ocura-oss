@@ -2,6 +2,10 @@
 
 This file records user-visible changes to Ocura OSS.
 
+## 0.2.1 - 2026-08-24
+
+- Point package metadata and repository documentation to the hosted Ocura OSS reference at `https://ocuna-ai.com/docs`.
+
 ## 0.2.0 - 2026-08-24
 
 - Add a provisional typed Python API for initialization, execution, branching, comparison, verification, and demonstration.
