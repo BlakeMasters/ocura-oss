@@ -2,6 +2,11 @@
 
 This file records user-visible changes to Ocura OSS.
 
+## 0.2.2 - 2026-08-24
+
+- Make automatic comparison select the newest chokepoint that has child pathways, while preserving `no_branch` for states with no branches.
+- Retain valid log references during verification so checksum-mismatched logs receive one accurate problem report.
+
 ## 0.2.1 - 2026-08-24
 
 - Point package metadata and repository documentation to the hosted Ocura OSS reference at `https://ocuna-ai.com/docs`.

@@ -312,6 +312,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("comparison: partial", compare_text)
 
+        code, automatic_text, _ = self._run("compare", "--root", str(self.root))
+        self.assertEqual(code, 0)
+        self.assertIn("comparison: partial", automatic_text)
+
         code, _text, _err = self._run(
             "run",
             "--root",
@@ -342,9 +346,10 @@ class CliTests(unittest.TestCase):
         self.assertIn("run_parameters", compare_json)
         self.assertNotIn("command", compare_json)
 
-        code, no_branch, _ = self._run("compare", "--root", str(self.root))
+        code, automatic_ready, _ = self._run("compare", "--root", str(self.root))
         self.assertEqual(code, 0)
-        self.assertIn("comparison: no_branch", no_branch)
+        self.assertIn("comparison: ready", automatic_ready)
+        self.assertIn(f"source chokepoint: {chokepoint_id}", automatic_ready)
 
     def test_branch_requires_reason_and_valid_source(self):
         code, _text, _err = self._run("branch", "--from", "chokepoint-" + "0" * 32, "--reason", "x")

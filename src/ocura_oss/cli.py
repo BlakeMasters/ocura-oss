@@ -240,7 +240,10 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="source",
         default=None,
         metavar="CHOKEPOINT_ID",
-        help="source chokepoint id (default: the newest branchable chokepoint)",
+        help=(
+            "source chokepoint id (default: newest source with child pathways,"
+            " or newest terminal chokepoint when no branches exist)"
+        ),
     )
     compare_parser.add_argument(
         "--json", action="store_true", help="print machine-readable JSON instead of text"

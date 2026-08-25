@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MPL-2.0
 
+import datetime
 import hashlib
 import json
 import sys
@@ -185,12 +186,13 @@ class CompareTests(unittest.TestCase):
         self.root = Path(self._temporary.name) / "proj"
         self.store, self.pathway = make_store(self.root)
 
-    def _source(self):
+    def _source(self, *, now=None):
         execution = runner.run_command(
             self.store,
             pathway_id=self.pathway.id,
             argv=["true"],
             declared_parameters={},
+            now=now,
         )
         return branching.load_verified_source(self.store, execution.chokepoint.id), execution
 
@@ -258,10 +260,57 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(changed.parameters.changed, {"batch": {"source": "2", "child": "9"}})
         self.assertEqual(changed.parameters.added, {})
 
-    def test_compare_selects_newest_valid_branchable_chokepoint(self):
+    def test_compare_without_branches_selects_newest_chokepoint(self):
         (_c1, _a1, _p1), first_execution = self._source()
         (_c2, _a2, _p2), second_execution = self._source()
         result = branching.compare(self.store, None)
+        self.assertEqual(result.source_chokepoint_id, second_execution.chokepoint.id)
+
+    def test_compare_selects_branched_source_over_newer_unbranched_chokepoint(self):
+        source, first_execution = self._source(
+            now=lambda: datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+        )
+        branching.create_child_pathway(
+            self.store,
+            source_chokepoint=source[0],
+            source_pathway=source[2],
+            reason="test a branch",
+            overrides={},
+            now=lambda: datetime.datetime(2026, 1, 1, 1, tzinfo=datetime.UTC),
+        )
+        self._source(now=lambda: datetime.datetime(2026, 1, 2, tzinfo=datetime.UTC))
+
+        result = branching.compare(self.store, None)
+
+        self.assertEqual(result.source_chokepoint_id, first_execution.chokepoint.id)
+        self.assertIs(result.state, model.ComparisonState.PARTIAL)
+
+    def test_compare_selects_newest_source_when_multiple_have_children(self):
+        first_source, _first_execution = self._source(
+            now=lambda: datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+        )
+        branching.create_child_pathway(
+            self.store,
+            source_chokepoint=first_source[0],
+            source_pathway=first_source[2],
+            reason="first branch",
+            overrides={},
+            now=lambda: datetime.datetime(2026, 1, 1, 1, tzinfo=datetime.UTC),
+        )
+        second_source, second_execution = self._source(
+            now=lambda: datetime.datetime(2026, 1, 2, tzinfo=datetime.UTC)
+        )
+        branching.create_child_pathway(
+            self.store,
+            source_chokepoint=second_source[0],
+            source_pathway=second_source[2],
+            reason="second branch",
+            overrides={},
+            now=lambda: datetime.datetime(2026, 1, 2, 1, tzinfo=datetime.UTC),
+        )
+
+        result = branching.compare(self.store, None)
+
         self.assertEqual(result.source_chokepoint_id, second_execution.chokepoint.id)
 
     def test_compare_fails_closed_on_invalid_chokepoint(self):
