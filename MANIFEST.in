@@ -1,6 +1,6 @@
 include CHANGELOG.md
 include CONTRIBUTING.md
 include SECURITY.md
-include docs/index.md
-include docs/python-api.md
-include docs/state-and-verification.md
+recursive-include docs *.md
+prune examples
+exclude tests/test_autoregressive_example.py

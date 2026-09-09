@@ -38,6 +38,12 @@ python -m twine check dist/*
 
 The test suite uses `unittest`; pytest is not required. Please add or update tests when behavior changes, and update the README and changelog when a public command or record changes.
 
+When changing examples, also run Ruff on `examples/` and use the optional integration
+checks described in [the autoregressive guide](https://github.com/BlakeMasters/ocura-oss/blob/main/examples/autoregressive/README.md).
+The normal test suite keeps framework imports optional. Examples, their requirements,
+and their tests stay in the repository and are excluded from both distributions.
+The core package stays dependency-free.
+
 ## Pull requests
 
 A pull request should explain what changed, why the change belongs in this research package, and how it was verified. Keep unrelated cleanup separate so reviewers can evaluate the behavior directly.

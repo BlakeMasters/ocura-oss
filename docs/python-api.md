@@ -40,7 +40,12 @@ assert comparison.state is ComparisonState.READY
 assert verify(root).ok
 ```
 
-Commands run directly on the local machine. Use this API only for trusted, same-owner workloads. Command arguments, declared parameters, branch reasons, and output logs are stored locally; keep secrets out of these fields.
+Call this API from scripts or an AI agent's existing execution environment. Commands
+inherit that environment's permissions; provide isolation there when needed.
+Command arguments, parameter labels, branch reasons, and output are stored locally.
+Keep secrets out of those fields. Parameters record labels; pass actual workload
+settings in the command too. See the [autoregressive example](https://github.com/BlakeMasters/ocura-oss/blob/main/examples/autoregressive/README.md)
+for PyTorch/JAX workloads and an optional Ray executor.
 
 ## Workflow functions
 

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ocura-oss"
-version = "0.2.2"
-description = "A research package for integrity-checked, branchable records of local command execution."
+version = "0.3.0"
+description = "A local execution ledger for recording, branching, and comparing command runs."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MPL-2.0"

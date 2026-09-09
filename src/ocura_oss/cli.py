@@ -66,9 +66,9 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="ocura-oss",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
-            "Ocura OSS records a research workflow: run, evidence, chokepoint, "
-            "branch, rerun, compare. An early concept for trusted same-owner "
-            "local work; commands are not sandboxed."
+            "A local execution ledger: record a baseline, branch, rerun, and "
+            "compare. Use the CLI from your terminal, scripts, or an AI agent. "
+            "Commands inherit your execution environment's permissions."
         ),
     )
     subparsers = parser.add_subparsers(dest="command_name", required=True)
@@ -94,6 +94,9 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help="name recorded in the den (default: ocura-oss)",
     )
+    init_parser.add_argument(
+        "--json", action="store_true", help="print project paths and IDs as JSON"
+    )
 
     run_parser = subparsers.add_parser(
         "run",
@@ -103,11 +106,13 @@ def _build_parser() -> argparse.ArgumentParser:
             "Runs COMMAND directly with shell=False, the project root as working"
             " directory, and captured stdout/stderr logs. Everything after -- is"
             " the command; put run's own options before it.\n"
-            "Example: ocura-oss run --pathway ID --param batch=2 -- python script.py\n"
+            "Example: ocura-oss run --pathway ID --param batch=2 -- python script.py --batch 2\n"
+            "Parameters are recorded labels; pass actual inputs to COMMAND.\n"
             "While the command runs, its output streams to your terminal and is"
             " recorded under .ocura-oss/logs/. If you press Ctrl+C, the partial"
             " attempt is still recorded as interrupted evidence; a second"
-            " Ctrl+C exits immediately instead.\n"
+            " Ctrl+C exits immediately instead. With --json, command output"
+            " stays in the logs and stdout contains one result object.\n"
             "Exit codes: 0 passed, 1 command failed or was interrupted,"
             " 3 could not launch; every attempt produces a terminal chokepoint."
         ),
@@ -129,12 +134,17 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="KEY=VALUE",
-        help="declared parameter stored on this atom only; repeatable",
+        help="record a parameter label (not passed to COMMAND); repeatable",
     )
     run_parser.add_argument(
         "--quiet",
         action="store_true",
         help="do not stream the command's output to the terminal",
+    )
+    run_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print one result as JSON; command output is retained in logs without streaming",
     )
     run_parser.add_argument(
         "command",
@@ -334,12 +344,23 @@ def _collect_parameters(tokens: Sequence[str]) -> dict:
 
 
 def _emit_json(payload: dict) -> None:
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    # Escaped Unicode round-trips through JSON even on legacy Windows stdout encodings.
+    print(json.dumps(payload, ensure_ascii=True, indent=2))
 
 
 def _init(args: argparse.Namespace) -> int:
     state = _open_store(args.root, require_state=False)
     den, pathway = state.initialize_state(name=args.name)
+    if args.json:
+        _emit_json(
+            {
+                "root": str(state.root),
+                "state_dir": str(state.state_dir),
+                "den_id": den.id,
+                "default_pathway_id": pathway.id,
+            }
+        )
+        return EXIT_OK
     print(f"den: {den.id}")
     print(f"default pathway: {pathway.id}")
     print(f"state: {state.state_dir}")
@@ -355,8 +376,9 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
     declared = _collect_parameters(args.param)
     pathway_id = args.pathway or state.load_den().default_pathway_id
     state.load_pathway(pathway_id)
-    mirror = not args.quiet
-    print(f"recording under {state.state_dir}")
+    mirror = not (args.quiet or args.json)
+    if not args.json:
+        print(f"recording under {state.state_dir}")
     execution = runner.run_command(
         state,
         pathway_id=pathway_id,
@@ -364,6 +386,31 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
         declared_parameters=declared,
         mirror=mirror,
     )
+    atom = execution.atom
+    if args.json:
+        _emit_json(
+            {
+                "atom_id": atom.id,
+                "chokepoint_id": execution.chokepoint.id,
+                "pathway_id": atom.pathway_id,
+                "outcome": atom.outcome.value,
+                "duration_seconds": atom.duration_seconds,
+                "return_code": atom.return_code,
+                "launch_error_category": atom.launch_error_category,
+                "stdout_log": atom.stdout_log,
+                "stderr_log": atom.stderr_log,
+            }
+        )
+    else:
+        _print_run(execution)
+    if atom.outcome is model.Outcome.LAUNCH_FAILED:
+        return EXIT_LAUNCH_FAILED
+    if atom.outcome in (model.Outcome.FAILED, model.Outcome.INTERRUPTED):
+        return EXIT_COMMAND_FAILED
+    return EXIT_OK
+
+
+def _print_run(execution: runner.RunExecution) -> None:
     atom = execution.atom
     print(f"atom: {atom.id}")
     print(f"chokepoint: {execution.chokepoint.id}")
@@ -379,11 +426,6 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             print("interrupted: partial output retained in the logs above")
         else:
             print(f"launch error: {atom.launch_error_category}")
-    if atom.outcome is model.Outcome.LAUNCH_FAILED:
-        return EXIT_LAUNCH_FAILED
-    if atom.outcome in (model.Outcome.FAILED, model.Outcome.INTERRUPTED):
-        return EXIT_COMMAND_FAILED
-    return EXIT_OK
 
 
 def _pathway_summaries(state: store.Store) -> list[model.PathwaySummary]:

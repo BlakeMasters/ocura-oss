@@ -1,6 +1,7 @@
 # Ocura OSS documentation
 
-Ocura OSS records trusted local command runs, the reasons branches are created, and the evidence produced by later runs. State remains under `.ocura-oss/` in the project directory.
+Ocura OSS connects a baseline command run to later variations, their reasons, and
+their recorded output. State remains under `.ocura-oss/` in the project directory.
 
 The package provides two interfaces:
 
@@ -18,6 +19,9 @@ The Python API is provisional during the 0.x series. Documented names are suppor
 ## Repository references
 
 - [README](../README.md): installation, command workflow, and operating boundaries
+- [CLI reference](cli.md): commands, JSON results, and exit handling
+- [Scripts and AI agents](automation.md): programmatic workflow and caller guidance
+- [Autoregressive example](https://github.com/BlakeMasters/ocura-oss/blob/main/examples/autoregressive/README.md): repository-only PyTorch, JAX, and Ray workflows
 - [Python API](python-api.md): supported functions, `Store`, result types, and exceptions
 - [State and verification](state-and-verification.md): record layout, checks, and runtime boundaries
 - [Contributing](../CONTRIBUTING.md): development setup and required checks

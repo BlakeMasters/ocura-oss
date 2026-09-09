@@ -2,6 +2,19 @@
 
 This file records user-visible changes to Ocura OSS.
 
+## 0.3.0 - 2026-09-08
+
+- Add `init --json` and `run --json` for complete machine-readable command workflows.
+  Execution JSON retains the existing exit codes and keeps subprocess output in logs.
+- Escape Unicode in CLI JSON so paths and labels round-trip on legacy Windows encodings.
+- Add a small repository-only autoregressive character-model example with optional PyTorch and JAX
+  backends, an optional local Ray Core executor, a baseline/variant experiment,
+  and a report reconstructed from saved evidence. Example scripts, requirements, and
+  tests are excluded from both package distributions; documentation links to the repository.
+- Explain local experiment workflows for terminal users, scripts, and AI agents;
+  clarify recorded parameter labels and provide a repository CLI reference.
+- Keep the core runtime dependency-free and preserve the existing state format.
+
 ## 0.2.2 - 2026-08-24
 
 - Make automatic comparison select the newest chokepoint that has child pathways, while preserving `no_branch` for states with no branches.
