@@ -68,6 +68,12 @@ Automatic source selection for `compare()` requires the complete state to verify
 
 Verification establishes consistency among local records and logs. It does not capture or prove the external conditions needed to reproduce a command.
 
+For programmatic consumption, `Store.read_verified_log(atom_id, stream="stdout")`
+returns the complete selected log as bytes, checking the size and SHA-256 digest
+of those exact bytes against the validated atom. It also accepts `stream="stderr"`.
+This targeted read does not verify the other stream or the complete ledger. See the
+[Python API](python-api.md) for its memory and verification scope.
+
 ## Stored information
 
 Atoms retain command arguments, outcomes, timing, return codes, declared parameters, log paths, byte counts, and log digests. Logs retain command output. Pathways retain branch reasons and effective declared parameters.

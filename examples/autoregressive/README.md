@@ -88,8 +88,9 @@ ocura-oss verify --root ./ar-pytorch --json
 ```
 
 Reporting needs only Ocura OSS and the standard library. It verifies the records,
-reads both stdout logs, checks that reported settings match the recorded labels,
-and calculates `variant.validation_loss - baseline.validation_loss`. A negative
+reads both stdout logs through `Store.read_verified_log`, checks that reported
+settings match the recorded labels, and calculates
+`variant.validation_loss - baseline.validation_loss`. A negative
 delta means lower validation loss. The generic `ocura-oss compare` command returns
 execution summaries and parameter deltas; the example supplies metric interpretation.
 

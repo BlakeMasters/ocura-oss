@@ -83,6 +83,11 @@ assert verify(root).ok
 comparison = compare(baseline.chokepoint.id, root=root)
 ```
 
+Use `Store(root).read_verified_log(atom_id, stream="stdout")` to consume recorded
+output as bytes checked against the stored atom's byte count and SHA-256 digest.
+The method also accepts `stream="stderr"`; decoding and metric interpretation
+remain with your script. See the [Python API](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/python-api.md#state-access).
+
 An agent can use the same CLI or Python workflow inside its existing execution
 environment. The [automation guide](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/automation.md) explains JSON results,
 exit codes, parameter labels, and how to inspect earlier attempts.
