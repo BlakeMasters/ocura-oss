@@ -2,7 +2,7 @@
 
 This file records user-visible changes to Ocura OSS.
 
-## Unreleased
+## 0.4.0 - 2026-09-16
 
 - Add `Store.read_verified_log()` to read stdout or stderr as bytes and verify
   their exact byte count and SHA-256 digest against the stored atom. Update the
