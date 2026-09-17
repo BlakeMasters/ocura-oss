@@ -203,7 +203,8 @@ class Store:
         """Resolve one recorded log path after containment checks.
 
         Call :meth:`verify_atom_evidence` first when the log's recorded size and
-        digest must also be checked.
+        digest must also be checked. Use :meth:`read_verified_log` to consume
+        bytes whose size and digest are checked as part of the same read.
         """
         if stream == "stdout":
             relative = atom.stdout_log
@@ -212,6 +213,40 @@ class Store:
         else:
             raise StoreError("log stream must be 'stdout' or 'stderr'")
         return self._evidence_path(atom.id, relative)
+
+    def read_verified_log(
+        self, atom_id: str, *, stream: Literal["stdout", "stderr"] = "stdout"
+    ) -> bytes:
+        """Read one complete log and verify the exact bytes returned.
+
+        Loads the stored atom and validates its lineage, then checks the selected
+        log's containment, byte count, and SHA-256 digest. Missing, unreadable, or
+        inconsistent evidence raises StoreError. The other log and the rest of
+        the ledger are not verified. The complete log is held in memory; decoding
+        and interpretation are left to the caller.
+        """
+        atom = self.load_atom(atom_id)
+        if stream == "stdout":
+            relative, size, digest = atom.stdout_log, atom.stdout_bytes, atom.stdout_sha256
+        elif stream == "stderr":
+            relative, size, digest = atom.stderr_log, atom.stderr_bytes, atom.stderr_sha256
+        else:
+            raise StoreError("log stream must be 'stdout' or 'stderr'")
+        try:
+            path = self.resolve_log_path(atom, stream)
+            if not path.is_file():
+                raise StoreError(f"atom {atom_id} log is missing: {relative}")
+            data = path.read_bytes()
+        except (OSError, ValueError) as exc:
+            raise StoreError(f"atom {atom_id} log is unreadable: {relative}") from exc
+        if len(data) != size:
+            raise StoreError(
+                f"atom {atom_id} log size mismatch for {relative}: "
+                f"recorded {size}, found {len(data)}"
+            )
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise StoreError(f"atom {atom_id} log checksum mismatch for {relative}")
+        return data
 
     def _verify_log(
         self, atom_id: str, relative: str, recorded_size: int, recorded_digest: str

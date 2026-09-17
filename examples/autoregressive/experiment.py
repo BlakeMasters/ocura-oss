@@ -49,8 +49,7 @@ def report(root: Path) -> dict:
         if summary.outcome.value != "passed":
             raise ValueError(f"recorded run {summary.id} did not pass")
         atom = store.load_atom(summary.id)
-        store.verify_atom_evidence(atom)
-        data = json.loads(store.resolve_log_path(atom, "stdout").read_text(encoding="utf-8"))
+        data = json.loads(store.read_verified_log(atom.id).decode("utf-8"))
         if data.get("example") != "autoregressive-character-v1":
             raise ValueError("the selected logs are not from this example")
         for key in ("backend", "steps", "learning_rate", "seed", "executor"):

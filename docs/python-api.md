@@ -142,6 +142,26 @@ Construction resolves `~`, relative paths, and the current directory without cha
 - `list_pathways()`, `list_atoms()`, and `list_chokepoints()` return deterministic validated listings.
 - `has_terminal_evidence(pathway_id)` reports whether a pathway has an atom.
 - `resolve_log_path(atom, stream)` returns a containment-checked `stdout` or `stderr` path.
+- `read_verified_log(atom_id, *, stream="stdout")` returns the selected log as `bytes`
+  after loading and validating the stored atom and its lineage, checking path containment,
+  and verifying the byte count and SHA-256 digest of the exact bytes returned.
+
+Use `read_verified_log` when consuming recorded output:
+
+```python
+import json
+
+raw = store.read_verified_log(atom_id, stream="stdout")
+metrics = json.loads(raw.decode("utf-8"))  # Only for workloads that emit UTF-8 JSON.
+```
+
+The method reads the complete log into memory, preserves binary output unchanged,
+and raises `StoreError` for missing, unreadable, or inconsistent evidence. Both
+`stdout` and `stderr` are supported, including output from failed commands. It
+does not parse metrics, verify the other stream, or verify the whole ledger; use
+`verify_state()` for the complete state check. The returned bytes remain the
+verified contents even if the file later changes. Reading does not lock the ledger
+or establish an atomic snapshot of its records and logs.
 
 ### Initialization and verification
 

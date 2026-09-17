@@ -1,6 +1,6 @@
 # CLI reference
 
-This reference describes version `0.3.0`. JSON uses ASCII-safe
+This reference describes version `0.4.0`. JSON uses ASCII-safe
 Unicode escapes, preserving decoded values across console encodings. Every command accepts
 `--help`. See [automation](automation.md) for scripted and AI-agent use and the
 [Python API](python-api.md) for typed results.
