@@ -2,6 +2,16 @@
 
 This file records user-visible changes to Ocura OSS.
 
+## Unreleased
+
+- Add a repository-only Dream-RSI-inspired training replay example with optional
+  CPU PyTorch, checkpoint save/restore, policy replay, and fresh-seed comparison.
+  Training integration checks are opt-in; the package API and runtime dependencies
+  are unchanged.
+- Add a separate Dream-RSI training adaptation with agent-written schedules
+  and exploration policies, repeated replay and redeployment, independent controls,
+  machine-capacity checks, and reports reconstructed from verified evidence.
+
 ## 0.4.0 - 2026-09-16
 
 - Add `Store.read_verified_log()` to read stdout or stderr as bytes and verify

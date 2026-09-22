@@ -4,3 +4,5 @@ include SECURITY.md
 recursive-include docs *.md
 prune examples
 exclude tests/test_autoregressive_example.py
+exclude tests/test_dream_replay_example.py
+exclude tests/test_dream_rsi_*.py

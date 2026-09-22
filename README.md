@@ -69,6 +69,19 @@ python examples/autoregressive/experiment.py report --root ./ar-pytorch
 The guide includes JAX and Ray commands. The script supplies metric reading and
 interpretation; the package supplies recording, lineage, and verification.
 
+The [Dream-RSI-inspired replay example](examples/dream_replay/README.md) adds a CPU
+training-search workflow: save and restore nanoGPT checkpoints, replay allocation
+policies from verified logs, and try the selected policy on a fresh seed. Checkpoint
+management and policy selection remain example code. Its default smoke profile
+demonstrates the mechanism; it does not establish compute savings.
+
+The [Dream-RSI training adaptation](examples/dream_rsi/README.md) adds real discovery
+and policy-development agents, recorded-history replay, and repeated redeployment
+with independent training controls. This implementation-support study demonstrates
+the package integration, with no established training-quality or resource-savings
+advantage. Training runs locally; agent inference uses an external Codex service.
+Agent access and CPU PyTorch belong to the optional repository example.
+
 ## Python and automation
 
 ```python

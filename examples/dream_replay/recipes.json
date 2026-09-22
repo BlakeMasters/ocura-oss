@@ -1,0 +1,22 @@
+{
+  "smoke": {
+    "layers": 1, "heads": 2, "width": 32, "context": 16, "batch": 2,
+    "quantum": 2, "horizon": 4, "threads": 1, "eval_windows": 4,
+    "recipes": [
+      {"name": "constant", "lr": 0.001, "schedule": "constant", "warmup": 1, "dropout": 0.0},
+      {"name": "cosine", "lr": 0.001, "schedule": "cosine", "warmup": 1, "dropout": 0.0},
+      {"name": "warmup", "lr": 0.001, "schedule": "constant", "warmup": 4, "dropout": 0.0},
+      {"name": "dropout", "lr": 0.001, "schedule": "cosine", "warmup": 1, "dropout": 0.1}
+    ]
+  },
+  "cpu": {
+    "layers": 2, "heads": 4, "width": 128, "context": 64, "batch": 8,
+    "quantum": 32, "horizon": 4, "threads": 1, "eval_windows": 8,
+    "recipes": [
+      {"name": "constant", "lr": 0.001, "schedule": "constant", "warmup": 8, "dropout": 0.0},
+      {"name": "cosine", "lr": 0.001, "schedule": "cosine", "warmup": 8, "dropout": 0.0},
+      {"name": "warmup", "lr": 0.001, "schedule": "constant", "warmup": 32, "dropout": 0.0},
+      {"name": "dropout", "lr": 0.001, "schedule": "cosine", "warmup": 8, "dropout": 0.1}
+    ]
+  }
+}

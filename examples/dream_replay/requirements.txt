@@ -1,0 +1,3 @@
+# Optional CPU training only; replay and reports need only ocura-oss.
+# Install from https://download.pytorch.org/whl/cpu as shown in README.md.
+torch==2.6.0
