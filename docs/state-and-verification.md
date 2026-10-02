@@ -1,5 +1,7 @@
 # State and verification
 
+Version 0.4.0.
+
 Ocura OSS stores records and command output under `.ocura-oss/` in one project directory. It does not use a service or a global project index.
 
 ## Directory layout
@@ -68,11 +70,22 @@ Automatic source selection for `compare()` requires the complete state to verify
 
 Verification establishes consistency among local records and logs. It does not capture or prove the external conditions needed to reproduce a command.
 
-For programmatic consumption, `Store.read_verified_log(atom_id, stream="stdout")`
-returns the complete selected log as bytes, checking the size and SHA-256 digest
-of those exact bytes against the validated atom. It also accepts `stream="stderr"`.
-This targeted read does not verify the other stream or the complete ledger. See the
-[Python API](python-api.md) for its memory and verification scope.
+## Reading verified output
+
+`Store.read_verified_log(atom_id, stream="stdout")` loads and validates the stored
+atom and its lineage, checks the selected log's containment, and verifies the exact
+bytes it returns against the atom's recorded byte count and SHA-256 digest. Pass
+`stream="stderr"` for the other stream. Both streams can be read for failed attempts.
+
+The complete selected log is held in memory and returned as bytes. Decoding and
+metric interpretation belong to the caller. Unlike resolving a path and reading it
+later, this method verifies the same bytes your code receives.
+
+The read is scoped to the selected stream: it does not verify the other stream,
+unrelated records, or the whole ledger. Continue to use `verify()` or
+`Store.verify_state()` for a complete check. It does not lock the ledger or provide
+an atomic snapshot; returned bytes remain unchanged if the file changes afterward.
+See the [Python API](python-api.md#storeread_verified_log) for usage and errors.
 
 ## Stored information
 

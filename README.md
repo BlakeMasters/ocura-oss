@@ -86,7 +86,7 @@ comparison = compare(baseline.chokepoint.id, root=root)
 Use `Store(root).read_verified_log(atom_id, stream="stdout")` to consume recorded
 output as bytes checked against the stored atom's byte count and SHA-256 digest.
 The method also accepts `stream="stderr"`; decoding and metric interpretation
-remain with your script. See the [Python API](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/python-api.md#state-access).
+remain with your script. See the [Python API](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/python-api.md#storeread_verified_log).
 
 An agent can use the same CLI or Python workflow inside its existing execution
 environment. The [automation guide](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/automation.md) explains JSON results,
@@ -94,13 +94,15 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 
 ## Documentation
 
+- [Overview](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/index.md): installation, concepts, and the complete workflow
 - [CLI reference](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/cli.md): every command, JSON fields, and exit codes
 - [Python API](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/python-api.md): functions, typed results, and `Store`
+- [Scripts and AI agents](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/automation.md): JSON workflows and verified output consumption
 - [State and verification](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/state-and-verification.md): records and checks
 - [Autoregressive example](https://github.com/BlakeMasters/ocura-oss/blob/main/examples/autoregressive/README.md): PyTorch, JAX, and Ray
 - [Hosted documentation](https://ocuna-ai.com/docs): the currently published release
 
-Repository references describe this checkout and remain readable directly on GitHub.
+The full references are included in this checkout and remain readable directly on GitHub.
 
 ## Local state and operating model
 

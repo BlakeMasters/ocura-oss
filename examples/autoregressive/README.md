@@ -1,5 +1,7 @@
 # Small autoregressive experiment
 
+Version 0.4.0.
+
 Train a character-level next-token model with **PyTorch** or **JAX**, either directly
 or inside a **Ray Core task**. Ocura OSS records the baseline, the reason for a
 variation, both outputs, and their lineage. Inspect the experiment later without
@@ -87,10 +89,11 @@ ocura-oss compare --root ./ar-pytorch --json
 ocura-oss verify --root ./ar-pytorch --json
 ```
 
-Reporting needs only Ocura OSS and the standard library. It verifies the records,
-reads both stdout logs through `Store.read_verified_log`, checks that reported
-settings match the recorded labels, and calculates
-`variant.validation_loss - baseline.validation_loss`. A negative
+Reporting needs only Ocura OSS 0.4.0 or later and the standard library. It verifies
+the saved state, reads each run's stdout through `Store.read_verified_log()` so the
+consumed bytes match their recorded size and digest, and checks that reported
+settings match the recorded labels. It then
+calculates `variant.validation_loss - baseline.validation_loss`. A negative
 delta means lower validation loss. The generic `ocura-oss compare` command returns
 execution summaries and parameter deltas; the example supplies metric interpretation.
 

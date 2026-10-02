@@ -1,5 +1,7 @@
 # Scripts and AI agents
 
+Version 0.4.0.
+
 Ocura OSS can be called from a shell, a Python program, or an AI agent's existing
 command tool. Use it when you want a durable record connecting a baseline to later
 variations, with reasons, outputs, and verification.
@@ -11,16 +13,39 @@ variations, with reasons, outputs, and verification.
 3. Call `branch --json --from ID --reason TEXT` with the proposed parameter labels.
 4. Pass the returned branch `id` to the next `run --pathway ID --json`.
 5. Read `verify --json` and `compare --json --from ID` before using the results.
-6. Read the referenced logs for the metrics your task needs.
+6. Consume the referenced output through `Store.read_verified_log()` for the metrics your task needs.
 
 All invocations must use the intended `--root`. The returned IDs connect the steps
 without scraping text. Parameters label the record; set actual command arguments
 separately. Handle nonzero exits: `run` still returns a recorded result for a failed
 command, interruption, or launch failure. See [CLI](cli.md).
 
-The [autoregressive example](https://github.com/BlakeMasters/ocura-oss/blob/main/examples/autoregressive/README.md) is an executable
+The [autoregressive example](../examples/autoregressive/README.md) is an executable
 client of this interface, with PyTorch/JAX choices and an optional Ray Core executor.
 The [Python API](python-api.md) provides the same operations with typed results.
+
+## Consume saved output
+
+In 0.4.0, a Python caller can read verified bytes directly from a retained atom ID:
+
+```python
+import json
+
+from ocura_oss import Store
+
+store = Store("experiment")
+raw = store.read_verified_log("atom-<id>")
+metrics = json.loads(raw.decode("utf-8"))  # For a workload that emits UTF-8 JSON.
+```
+
+The default stream is `stdout`; pass `stream="stderr"` to read diagnostics, including
+output from a failed attempt. The method validates the stored atom and its lineage,
+then checks containment, byte count, and SHA-256 for the exact bytes it returns.
+Missing, unreadable, or inconsistent evidence raises `StoreError`.
+
+This method reads the whole selected log into memory. It does not parse metrics,
+verify the other stream, or verify the complete ledger. Keep the workflow's full
+`verify` step; see [state and verification](state-and-verification.md) for the distinction.
 
 ## Example instruction for a caller
 
