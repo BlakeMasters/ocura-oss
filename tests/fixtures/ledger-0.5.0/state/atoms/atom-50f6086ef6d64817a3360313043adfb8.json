@@ -1,0 +1,30 @@
+{
+  "schema_version": 2,
+  "kind": "atom",
+  "payload": {
+    "id": "atom-50f6086ef6d64817a3360313043adfb8",
+    "pathway_id": "pathway-c6132f322f6d463ab8b7876c695eb1e9",
+    "started_at": "2026-10-07T23:31:45.465906+00:00",
+    "finished_at": "2026-10-07T23:31:45.471503+00:00",
+    "duration_seconds": 0.002981,
+    "outcome": "launch_failed",
+    "return_code": null,
+    "launch_error_category": "executable_not_found",
+    "declared_parameters": {},
+    "command": [
+      "ocura-fixture-no-such-executable"
+    ],
+    "masked_arguments": [],
+    "output_capture": "full",
+    "stdout_log": ".ocura-oss/logs/atom-50f6086ef6d64817a3360313043adfb8.stdout.log",
+    "stderr_log": ".ocura-oss/logs/atom-50f6086ef6d64817a3360313043adfb8.stderr.log",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "f6578aba49870a6318e74559ad29892c8218607b48bc6a12fa939d229e1a8beb"
+  }
+}

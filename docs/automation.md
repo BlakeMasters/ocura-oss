@@ -1,6 +1,6 @@
 # Scripts and AI agents
 
-Version 0.4.0.
+Version 0.5.0.
 
 Ocura OSS can be called from a shell, a Python program, or an AI agent's existing
 command tool. Use it when you want a durable record connecting a baseline to later
@@ -20,13 +20,17 @@ without scraping text. Parameters label the record; set actual command arguments
 separately. Handle nonzero exits: `run` still returns a recorded result for a failed
 command, interruption, or launch failure. See [CLI](cli.md).
 
+If a `run` process is killed before it returns a result, its attempt remains
+unfinished. `attempts --json` lists it, `verify --json` reports it as a problem, and
+`recover --json` closes it as `abandoned` once the command itself has stopped.
+
 The [autoregressive example](../examples/autoregressive/README.md) is an executable
 client of this interface, with PyTorch/JAX choices and an optional Ray Core executor.
 The [Python API](python-api.md) provides the same operations with typed results.
 
 ## Consume saved output
 
-In 0.4.0, a Python caller can read verified bytes directly from a retained atom ID:
+A Python caller can read verified bytes directly from a retained atom ID:
 
 ```python
 import json
@@ -66,7 +70,8 @@ use explicit `compare --from ID` to return to that baseline. Automatic compariso
 selects the newest source with child pathways, which may be a different experiment
 once more work is added.
 
-Serialize writes to a shared root. For parallel independent experiments, use separate
-project roots and manage workload files separately. Ray workers in the supplied
-example return their metrics to the recorded driver command; they never mutate
-the same Ocura root concurrently.
+Several processes may record runs under one root at the same time, and `verify` and
+`compare --from ID` work while they do. Ocura OSS keeps its own records apart; the
+commands still share the project root as their working directory, so keep their
+workload files apart or give independent experiments separate roots. Ray workers in
+the supplied example return their metrics to one recorded driver command.

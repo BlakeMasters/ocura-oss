@@ -1,6 +1,6 @@
 # Python API reference
 
-Version 0.4.0.
+Version 0.5.0.
 
 The `ocura_oss` package exposes typed workflow functions, read-oriented state access, frozen result and record types, enums, and public exceptions.
 
@@ -114,6 +114,8 @@ run(
     pathway_id: str | None = None,
     parameters: Mapping[str, str] | None = None,
     mirror: bool = False,
+    capture: bool = True,
+    masked_arguments: Iterable[int] = (),
 ) -> RunExecution
 ```
 
@@ -128,6 +130,8 @@ Run one trusted local command and record terminal evidence.
 | `pathway_id` | string or None | `None` | Pathway that receives the atom; `None` selects the den's default pathway |
 | `parameters` | mapping of string to string, or None | `None` | Declared parameters stored on the atom; they are not passed to the child process |
 | `mirror` | boolean | `False` | Stream stdout and stderr to the current terminal while retaining the same bytes in logs |
+| `capture` | boolean | `True` | Retain stdout and stderr as logs; `False` writes no output to disk and records that it was not captured |
+| `masked_arguments` | iterable of integers | `()` | Zero-based positions in `command` whose tokens are stored as `<masked>`; the command still receives the real values |
 
 #### Returns
 
@@ -137,7 +141,7 @@ Run one trusted local command and record terminal evidence.
 
 | Exception | Condition |
 | --- | --- |
-| `StoreError` | Command tokens, parameter data, state, pathway, or evidence persistence is invalid |
+| `StoreError` | Command tokens, masked positions, parameter data, state, pathway, or evidence persistence is invalid |
 
 Child command failures and launch failures are returned as atom outcomes rather than raised as exceptions.
 
@@ -152,11 +156,17 @@ Child command failures and launch failures are returned as atom outcomes rather 
 
 Launch categories include `executable_not_found`, `permission_denied`, `not_a_directory`, `invalid_argument`, and `os_error`.
 
+`run()` never returns `Outcome.ABANDONED`. That outcome is written by [`recover()`](#ocura_ossrecover) for an attempt whose recording process stopped first.
+
 #### Notes
 
 The child runs with `shell=False` and the project root as its working directory. It inherits the invoking process environment, while the inherited environment remains outside recorded state.
 
-Stdout and stderr are stored separately under `.ocura-oss/logs/`. One atom and one branchable terminal chokepoint are written after the command ends. A second Ctrl+C may exit immediately before that attempt is recorded.
+Stdout and stderr are stored separately under `.ocura-oss/logs/`. With `capture=False`, no log files are written: the returned atom has `output_capture` set to `OutputCapture.NONE` and `None` in its six log fields, and `mirror=True` still streams the output.
+
+Each position in `masked_arguments` must index `command`; position 0 is the executable. The attempt and atom records store `<masked>` at those positions and list them. Masking does not alter output, so a command that prints a masked value still writes it to a captured log.
+
+The attempt is journaled under `.ocura-oss/attempts/` before the command launches. One atom and one branchable terminal chokepoint are written after the command ends, and the journal entry is then removed. A second Ctrl+C, or a killed process, leaves the entry in place; `recover()` closes it. Several processes may call `run()` against one root at the same time.
 
 The host machine, network, and process tree form the execution context. The trust model is trusted, same-owner local work.
 
@@ -296,7 +306,7 @@ Recheck every state record and every log referenced by a recorded run.
 
 #### Returns
 
-`StateVerification`. `report.ok` is true when `report.problems` is empty. The report contains record counts and the number of individual logs that passed verification.
+`StateVerification`. `report.ok` is true when `report.problems` is empty. The report contains record counts, the number of individual logs that passed verification, and the identifiers of running and abandoned attempts.
 
 #### Raises
 
@@ -308,7 +318,9 @@ Problems in other records and logs are normally collected in the returned report
 
 #### Notes
 
-Verification checks record envelopes, checksums, identifiers, filenames, required fields, semantic relationships, lineage, referenced log containment, byte counts, log digests, orphaned log files, and unexpected directories under `logs/`.
+Verification checks record envelopes, checksums, identifiers, filenames, required fields, semantic relationships, lineage, that every atom has exactly one chokepoint, referenced log containment, byte counts, log digests, orphaned log files, unexpected directories under `logs/`, and unfinished attempts.
+
+It may run while other processes record runs under the same root. An attempt that a live process is still recording appears in `running_attempts` and is not a problem. An abandoned attempt is a problem until `recover()` closes it.
 
 Verification establishes local consistency among records and logs. Authorship and execution-environment reproduction require separate evidence.
 
@@ -320,6 +332,57 @@ from ocura_oss import verify
 report = verify("experiment")
 for record, problem in report.problems:
     print(record, problem)
+```
+
+### `ocura_oss.recover`
+
+```python
+recover(
+    root: os.PathLike[str] | str | None = None,
+) -> tuple[RecoveredAttempt, ...]
+```
+
+Close every attempt whose recording process stopped before finalizing it.
+
+#### Parameters
+
+| Name | Type | Default | Description |
+| --- | --- | --- | --- |
+| `root` | path-like, string, or None | `None` | Project root containing initialized state |
+
+#### Returns
+
+A tuple with one `RecoveredAttempt` for each attempt that was closed. It is empty when nothing was abandoned.
+
+#### Raises
+
+| Exception | Condition |
+| --- | --- |
+| `StoreError` | Initialized state is absent, or an attempt record or its evidence is malformed or unreadable |
+
+#### Notes
+
+What recovery writes depends on how far the recorder got:
+
+| `RecoveredAttempt.action` | When | Result |
+| --- | --- | --- |
+| `RecoveryAction.ABANDONED` | No outcome had been recorded | An atom with `Outcome.ABANDONED` and its terminal chokepoint |
+| `RecoveryAction.COMPLETED` | The atom existed without its chokepoint | The missing chokepoint, with the atom's recorded outcome |
+| `RecoveryAction.CLEARED` | The atom and chokepoint both existed | The leftover attempt record is removed |
+
+An abandoned atom has `None` for `finished_at`, `duration_seconds`, `return_code`, and `launch_error_category`. Output captured before the recorder stopped is retained and measured, so it verifies afterward.
+
+Attempts that a live process is still recording are left alone, so recovery is safe while other runs are in flight. Call it only after the abandoned command itself has stopped: Ocura OSS does not stop a command whose recorder died, and one that is still running can keep writing to logs that recovery has measured.
+
+#### Example
+
+```python
+from ocura_oss import recover, verify
+
+for closed in recover("experiment"):
+    print(closed.atom_id, closed.action.value)
+
+assert verify("experiment").ok
 ```
 
 ### `ocura_oss.run_demo`
@@ -375,7 +438,7 @@ Store(
 
 Read and verify Ocura OSS state under one project root.
 
-The documented constructor, attributes, loading methods, listing methods, initialization method, and verification methods form the provisional low-level API. Direct record writers are internal.
+The documented constructor, attributes, loading methods, listing methods, initialization method, verification methods, and recovery method form the provisional low-level API. Direct record writers are internal.
 
 #### Parameters
 
@@ -392,6 +455,7 @@ The documented constructor, attributes, loading methods, listing methods, initia
 | `pathways_dir` | `pathlib.Path` | Pathway record directory |
 | `atoms_dir` | `pathlib.Path` | Atom record directory |
 | `chokepoints_dir` | `pathlib.Path` | Chokepoint record directory |
+| `attempts_dir` | `pathlib.Path` | Unfinished attempt records and their lock files |
 | `logs_dir` | `pathlib.Path` | Recorded log directory |
 | `den_path` | `pathlib.Path` | Den record path |
 
@@ -654,7 +718,7 @@ The resolved `pathlib.Path` directly inside this store's `.ocura-oss/logs/` dire
 
 | Exception | Condition |
 | --- | --- |
-| `StoreError` | `stream` is invalid or the recorded path is empty, absolute, escaping, or outside the direct logs directory |
+| `StoreError` | `stream` is invalid; the atom was recorded without output capture; or the recorded path is empty, absolute, escaping, or outside the direct logs directory |
 
 The returned path has passed containment checks only. Use `read_verified_log()` to consume bytes that have been checked against the stored atom; `verify_atom_evidence()` checks both logs without returning their contents.
 
@@ -685,7 +749,7 @@ The selected log as `bytes`, unchanged, after loading and validating the stored 
 
 | Exception | Condition |
 | --- | --- |
-| `StoreError` | The atom or lineage is invalid; the stream is invalid; or the selected log is missing, unreadable, outside containment, or inconsistent with its recorded byte count or digest |
+| `StoreError` | The atom or lineage is invalid; the stream is invalid; the atom was recorded without output capture; or the selected log is missing, unreadable, outside containment, or inconsistent with its recorded byte count or digest |
 | `RecursionError` | A crafted lineage exceeds the Python recursion limit |
 
 #### Notes
@@ -716,7 +780,7 @@ store.verify_atom_evidence(
 ) -> None
 ```
 
-Verify both log files referenced by one atom.
+Verify the log files referenced by one atom.
 
 #### Parameters
 
@@ -726,7 +790,7 @@ Verify both log files referenced by one atom.
 
 #### Returns
 
-`None` when both logs pass verification.
+`None` when both logs pass verification. An atom recorded without output capture has no logs and passes.
 
 #### Raises
 
@@ -775,7 +839,7 @@ Verify every state record and every log referenced by a valid atom.
 
 #### Returns
 
-`StateVerification`. Problems outside the den are collected by record name when possible. `logs_checked` counts individual log files that passed verification.
+`StateVerification`. Problems outside the den are collected by record name when possible. `logs_checked` counts individual log files that passed verification. `running_attempts` and `abandoned_attempts` name unfinished attempts.
 
 #### Raises
 
@@ -785,7 +849,39 @@ Verify every state record and every log referenced by a valid atom.
 
 #### Notes
 
-The scan reports invalid record files, broken relationships, invalid lineage, source-parent disagreement, missing or changed logs, orphaned files, and unexpected directories under `logs/`.
+The scan reports invalid record files, broken relationships, invalid lineage, source-parent disagreement, atoms without exactly one chokepoint, missing or changed logs, orphaned files, unexpected directories under `logs/`, and abandoned attempts.
+
+Other processes may record runs under the same root during the scan. A running attempt is not a problem, and its logs are not checked until it is finalized.
+
+### `Store.list_attempts`
+
+```python
+store.list_attempts() -> list[tuple[Attempt, AttemptState]]
+```
+
+Return unfinished attempts with their state, ordered by start time and then identifier.
+
+#### Returns
+
+A list of `(attempt, state)` pairs. The state is `AttemptState.RUNNING` while a live process is recording the attempt and `AttemptState.ABANDONED` once that process has stopped without finalizing it. A finalized attempt is an atom and is not listed.
+
+#### Raises
+
+`StoreError` if an attempt record is malformed, checksum-mismatched, misnamed, or unreadable.
+
+### `Store.recover`
+
+```python
+store.recover() -> tuple[RecoveredAttempt, ...]
+```
+
+Close every unfinished attempt whose recording process has stopped. Top-level [`recover()`](#ocura_ossrecover) calls this method and documents the actions, results, and limits.
+
+#### Raises
+
+| Exception | Condition |
+| --- | --- |
+| `StoreError` | Initialized state is absent, or an attempt record or its evidence is malformed or unreadable |
 
 ## Record types
 
@@ -854,19 +950,21 @@ Atom(
     id: str,
     pathway_id: str,
     started_at: str,
-    finished_at: str,
-    duration_seconds: float,
+    finished_at: str | None,
+    duration_seconds: float | None,
     outcome: Outcome,
     return_code: int | None,
     launch_error_category: str | None,
     declared_parameters: Mapping[str, str],
     command: tuple[str, ...],
-    stdout_log: str,
-    stderr_log: str,
-    stdout_bytes: int,
-    stderr_bytes: int,
-    stdout_sha256: str,
-    stderr_sha256: str,
+    stdout_log: str | None,
+    stderr_log: str | None,
+    stdout_bytes: int | None,
+    stderr_bytes: int | None,
+    stdout_sha256: str | None,
+    stderr_sha256: str | None,
+    output_capture: OutputCapture = OutputCapture.FULL,
+    masked_arguments: tuple[int, ...] = (),
 )
 ```
 
@@ -879,21 +977,83 @@ One recorded command attempt and its referenced output logs.
 | `id` | string | Atom identifier |
 | `pathway_id` | string | Pathway receiving this evidence |
 | `started_at` | string | UTC ISO 8601 start timestamp |
-| `finished_at` | string | UTC ISO 8601 finish timestamp |
-| `duration_seconds` | float | Nonnegative finite elapsed duration, rounded to six decimal places for package-created atoms |
+| `finished_at` | string or None | UTC ISO 8601 finish timestamp; `None` for an abandoned atom |
+| `duration_seconds` | float or None | Nonnegative finite elapsed duration, rounded to six decimal places for package-created atoms; `None` for an abandoned atom |
 | `outcome` | `Outcome` | Terminal command outcome |
 | `return_code` | integer or None | Process return code for passed and failed outcomes |
 | `launch_error_category` | string or None | Normalized launch category, or `interrupted` |
 | `declared_parameters` | mapping of string to string | Labels supplied to this run |
-| `command` | tuple of strings | Executable and argument tokens retained in the raw record |
-| `stdout_log` | string | Project-relative stdout log path |
-| `stderr_log` | string | Project-relative stderr log path |
-| `stdout_bytes` | integer | Recorded stdout byte count |
-| `stderr_bytes` | integer | Recorded stderr byte count |
-| `stdout_sha256` | string | Lowercase SHA-256 digest of stdout bytes |
-| `stderr_sha256` | string | Lowercase SHA-256 digest of stderr bytes |
+| `command` | tuple of strings | Executable and argument tokens retained in the raw record, with `<masked>` at each masked position |
+| `stdout_log` | string or None | Project-relative stdout log path |
+| `stderr_log` | string or None | Project-relative stderr log path |
+| `stdout_bytes` | integer or None | Recorded stdout byte count |
+| `stderr_bytes` | integer or None | Recorded stderr byte count |
+| `stdout_sha256` | string or None | Lowercase SHA-256 digest of stdout bytes |
+| `stderr_sha256` | string or None | Lowercase SHA-256 digest of stderr bytes |
+| `output_capture` | `OutputCapture` | Whether stdout and stderr were retained as logs |
+| `masked_arguments` | tuple of integers | Ascending positions in `command` that hold the masked placeholder |
 
-Outcome, return code, and launch category must satisfy the invariants described by `run()`.
+Outcome, return code, and launch category must satisfy the invariants described by `run()`. An abandoned atom carries neither a return code nor a launch category.
+
+The six log fields are all set when `output_capture` is `OutputCapture.FULL` and all `None` when it is `OutputCapture.NONE`. For an abandoned atom, the byte counts and digests describe each log as recovery found it.
+
+### `ocura_oss.Attempt`
+
+```python
+Attempt(
+    id: str,
+    pathway_id: str,
+    chokepoint_id: str,
+    started_at: str,
+    declared_parameters: Mapping[str, str],
+    command: tuple[str, ...],
+    stdout_log: str | None,
+    stderr_log: str | None,
+    output_capture: OutputCapture = OutputCapture.FULL,
+    masked_arguments: tuple[int, ...] = (),
+)
+```
+
+One run that has started and is not yet finalized, as returned by `Store.list_attempts()`.
+
+#### Attributes
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `id` | string | Identifier of the atom this attempt becomes when finalized |
+| `pathway_id` | string | Pathway the run was started on |
+| `chokepoint_id` | string | Identifier reserved for the atom's terminal chokepoint |
+| `started_at` | string | UTC ISO 8601 start timestamp |
+| `declared_parameters` | mapping of string to string | Labels supplied to this run |
+| `command` | tuple of strings | Executable and argument tokens, with `<masked>` at each masked position |
+| `stdout_log` | string or None | Project-relative stdout log path; `None` without capture |
+| `stderr_log` | string or None | Project-relative stderr log path; `None` without capture |
+| `output_capture` | `OutputCapture` | Whether stdout and stderr are being retained as logs |
+| `masked_arguments` | tuple of integers | Ascending positions in `command` that hold the masked placeholder |
+
+An attempt has no outcome, byte counts, or digests: its logs may still be growing.
+
+### `ocura_oss.RecoveredAttempt`
+
+```python
+RecoveredAttempt(
+    atom_id: str,
+    chokepoint_id: str,
+    pathway_id: str,
+    action: RecoveryAction,
+)
+```
+
+One unfinished attempt closed by `recover()`.
+
+#### Attributes
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `atom_id` | string | Atom the attempt was closed as |
+| `chokepoint_id` | string | That atom's terminal chokepoint |
+| `pathway_id` | string | Pathway containing the atom |
+| `action` | `RecoveryAction` | What closing the attempt had to do |
 
 ### `ocura_oss.Chokepoint`
 
@@ -969,7 +1129,7 @@ RunSummary(
     pathway_id: str,
     outcome: Outcome,
     started_at: str,
-    duration_seconds: float,
+    duration_seconds: float | None,
     return_code: int | None,
 )
 ```
@@ -984,7 +1144,7 @@ Reduced command fields used in comparisons and public summaries.
 | `pathway_id` | string | Pathway containing the atom |
 | `outcome` | `Outcome` | Terminal outcome |
 | `started_at` | string | UTC ISO 8601 start timestamp |
-| `duration_seconds` | float | Recorded elapsed duration |
+| `duration_seconds` | float or None | Recorded elapsed duration; `None` for an abandoned run |
 | `return_code` | integer or None | Process return code when applicable |
 
 #### Methods
@@ -1091,6 +1251,8 @@ StateVerification(
     chokepoints: int,
     logs_checked: int,
     problems: tuple[tuple[str, str], ...],
+    running_attempts: tuple[str, ...] = (),
+    abandoned_attempts: tuple[str, ...] = (),
 )
 ```
 
@@ -1105,6 +1267,8 @@ Result of verifying records and referenced logs under one state directory.
 | `chokepoints` | integer | Valid chokepoint records collected by the scan |
 | `logs_checked` | integer | Individual referenced logs that passed verification |
 | `problems` | tuple of pairs | `(record, problem)` entries collected during verification |
+| `running_attempts` | tuple of strings | Attempts a live process is still recording; not problems |
+| `abandoned_attempts` | tuple of strings | Attempts whose recorder stopped; each also appears in `problems` |
 
 #### Properties
 
@@ -1164,8 +1328,37 @@ String enum describing one terminal command attempt.
 | `Outcome.FAILED` | `failed` | Process returned nonzero |
 | `Outcome.LAUNCH_FAILED` | `launch_failed` | Process could not be launched |
 | `Outcome.INTERRUPTED` | `interrupted` | Attempt was interrupted and partial output was recorded |
+| `Outcome.ABANDONED` | `abandoned` | The recording process stopped before an outcome was recorded; the attempt was closed by `recover()` |
 
 `Outcome` derives from `enum.StrEnum`, so members also behave as strings.
+
+### `ocura_oss.OutputCapture`
+
+String enum stating whether a run's stdout and stderr were retained as logs.
+
+| Member | Value | Meaning |
+| --- | --- | --- |
+| `OutputCapture.FULL` | `full` | Both streams were written to logs |
+| `OutputCapture.NONE` | `none` | No output was written to disk |
+
+### `ocura_oss.AttemptState`
+
+String enum describing an unfinished attempt.
+
+| Member | Value | Meaning |
+| --- | --- | --- |
+| `AttemptState.RUNNING` | `running` | A live process is still recording the attempt |
+| `AttemptState.ABANDONED` | `abandoned` | The recording process stopped without finalizing the attempt |
+
+### `ocura_oss.RecoveryAction`
+
+String enum describing what closing an unfinished attempt had to do.
+
+| Member | Value | Meaning |
+| --- | --- | --- |
+| `RecoveryAction.ABANDONED` | `abandoned` | No outcome had been recorded; an abandoned atom and its chokepoint were written |
+| `RecoveryAction.COMPLETED` | `completed` | The atom existed; its missing chokepoint was written |
+| `RecoveryAction.CLEARED` | `cleared` | The atom and chokepoint existed; the leftover attempt record was removed |
 
 ### `ocura_oss.ComparisonState`
 
@@ -1226,7 +1419,7 @@ The destination is retained when it was created before the failure.
 ocura_oss.__version__: str
 ```
 
-Installed package version. Version 0.4.0 reports `"0.4.0"`.
+Installed package version. Version 0.5.0 reports `"0.5.0"`.
 
 ## Typing
 
@@ -1245,10 +1438,10 @@ Dataclass fields use concrete record and result types. Parameter inputs use `col
 
 ## State and concurrency
 
-The supported programmatic workflows write project-local `.ocura-oss/` state. Legacy `.ocura/` records are not compatible.
+The supported programmatic workflows write project-local `.ocura-oss/` state in schema version 2. State written by 0.4 and earlier, and legacy `.ocura/` records, are not compatible.
 
-One mutating process per state root is supported at a time. Public workflow functions perform record mutation; direct record writers remain internal.
+Several processes may record runs under one state root at the same time, and verification and comparison may run while they do. Public workflow functions perform record mutation; direct record writers remain internal. The liveness of an unfinished attempt is read from an operating-system file lock, which is reliable on local filesystems only.
 
-Raw atoms retain command arguments and logs retain command output. Keep secrets out of command arguments, parameter mappings, branch reasons, and output.
+Raw atoms retain command arguments and logs retain command output. Keep secrets out of command arguments, parameter mappings, branch reasons, and output. Where one cannot be avoided, `masked_arguments` keeps a command token out of the records and `capture=False` keeps output off disk.
 
 For command syntax and exit status, see the [CLI reference](cli.md). For the record layout and execution boundary, see the [documentation overview](index.md).

@@ -5,3 +5,4 @@ recursive-include docs *.md
 prune examples
 exclude tests/test_autoregressive_example.py
 exclude tests/test_release_check.py
+recursive-include tests/fixtures *

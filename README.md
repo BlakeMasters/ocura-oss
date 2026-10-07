@@ -47,7 +47,7 @@ metrics, such as validation loss or accuracy.
 Omit `--json` for terminal output. By default, `run` streams the command's output
 while retaining stdout and stderr logs; `--json` or `--quiet` keeps that output in
 the logs without streaming. A first Ctrl+C records an interrupted attempt; a
-second exits immediately and may leave that attempt unrecorded.
+second exits immediately and leaves the attempt for `ocura-oss recover` to close.
 
 ## Autoregressive example: PyTorch, JAX, and Ray
 
@@ -112,8 +112,9 @@ a **chokepoint** identifies terminal evidence from which a branch can be created
 
 Each branch records its source and reason. It represents a new line of work;
 workspace files, process state, and model weights are managed by the workload.
-One mutating process per state root is supported at a time. Delete `.ocura-oss/`
-to discard that project's records. Legacy `.ocura/` records are unsupported.
+Several processes may record runs under one state root at once. Delete `.ocura-oss/`
+to discard that project's records. State from 0.4 and earlier, and legacy `.ocura/`
+records, are unsupported.
 
 Commands run with `shell=False` in the project root and inherit the invoking
 environment's permissions. Use trusted, owner-authorized workloads. For generated
@@ -121,7 +122,8 @@ or otherwise untrusted commands, provide isolation and permissions through your
 execution environment; Ocura OSS itself does not sandbox or restrict them.
 
 Records retain command arguments, parameter labels, reasons, and output. Keep secrets
-out of these fields. SHA-256 checksums detect local inconsistencies; they do not
+out of these fields; `run --mask-arg` and `run --no-capture` cover a command token or
+output that cannot be avoided. SHA-256 checksums detect local inconsistencies; they do not
 authenticate authorship or prevent a writer from replacing records and checksums.
 
 ## Project status

@@ -1,6 +1,6 @@
 # Ocura OSS
 
-Version 0.4.0.
+Version 0.5.0.
 
 A local execution ledger for recording, branching, and comparing command runs.
 
@@ -12,17 +12,25 @@ records and logs before branching or comparing them.
 Use it from your terminal, Python scripts, or an AI agent with a shell. The CLI
 provides JSON output throughout the workflow; the Python API returns typed results.
 
-## New in 0.4.0
+## New in 0.5.0
 
-`Store.read_verified_log()` returns recorded stdout or stderr as bytes after checking
-their exact byte count and SHA-256 digest against the stored atom. Use it when a
-script needs to consume saved output, including metrics or failure diagnostics.
-Decoding and interpretation remain with your script.
+Version 0.5.0 changes the record format to schema 2. It does not read state written
+by 0.4 or earlier; start a new `.ocura-oss/` directory.
 
-The autoregressive example now uses this reader to reconstruct its report. The
-core runtime still uses only the standard library, and the state format is unchanged.
-See the [Python API](python-api.md#storeread_verified_log) for the method and its
-verification scope.
+- **Unfinished runs stay visible.** Each run is journaled before its command starts.
+  If the recording process is interrupted twice or killed, `ocura-oss attempts` shows
+  the attempt and `ocura-oss recover` closes it as `abandoned` without inventing an outcome.
+- **Several runs can share one root.** Concurrent `run` processes are supported, and
+  `verify` and `compare` work while runs are in flight.
+- **Sensitive values can stay out of records.** `run --no-capture` writes no output
+  to disk, and `run --mask-arg` stores a placeholder for a chosen command token.
+- **Verification is stricter.** Every atom must have exactly one chokepoint.
+- **Format changes follow a stated rule.** Readers ignore fields they do not know,
+  so later releases can add optional fields without another format break.
+
+The core runtime still uses only the standard library. See
+[state and verification](state-and-verification.md) for the format, attempts,
+concurrent use, and the limits of each option.
 
 ## Install and try
 
@@ -61,7 +69,7 @@ metrics, such as validation loss or accuracy.
 Omit `--json` for terminal output. By default, `run` streams the command's output
 while retaining stdout and stderr logs; `--json` or `--quiet` keeps that output in
 the logs without streaming. A first Ctrl+C records an interrupted attempt; a
-second exits immediately and may leave that attempt unrecorded.
+second exits immediately and leaves the attempt for `ocura-oss recover` to close.
 
 ## Autoregressive example: PyTorch, JAX, and Ray
 
@@ -124,8 +132,9 @@ a **chokepoint** identifies terminal evidence from which a branch can be created
 
 Each branch records its source and reason. It represents a new line of work;
 workspace files, process state, and model weights are managed by the workload.
-One mutating process per state root is supported at a time. Delete `.ocura-oss/`
-to discard that project's records. Legacy `.ocura/` records are unsupported.
+Several processes may record runs under one state root at once. Delete `.ocura-oss/`
+to discard that project's records. State from 0.4 and earlier, and legacy `.ocura/`
+records, are unsupported.
 
 Commands run with `shell=False` in the project root and inherit the invoking
 environment's permissions. Use trusted, owner-authorized workloads. For generated
@@ -133,7 +142,8 @@ or otherwise untrusted commands, provide isolation and permissions through your
 execution environment; Ocura OSS itself does not sandbox or restrict them.
 
 Records retain command arguments, parameter labels, reasons, and output. Keep secrets
-out of these fields. SHA-256 checksums detect local inconsistencies; they do not
+out of these fields; `run --mask-arg` and `run --no-capture` cover a command token or
+output that cannot be avoided. SHA-256 checksums detect local inconsistencies; they do not
 authenticate authorship or prevent a writer from replacing records and checksums.
 
 ## Project status

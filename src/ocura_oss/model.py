@@ -11,12 +11,13 @@ import json
 import math
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 CHECKSUM_ALGORITHM = "sha256"
 TERMINAL_KIND = "terminal"
+MASKED_ARGUMENT = "<masked>"
 
 _ID_PATTERN = re.compile(r"^(den|pathway|atom|chokepoint)-([0-9a-f]{32})$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -40,6 +41,29 @@ class Outcome(enum.StrEnum):
     FAILED = "failed"
     LAUNCH_FAILED = "launch_failed"
     INTERRUPTED = "interrupted"
+    ABANDONED = "abandoned"
+
+
+class OutputCapture(enum.StrEnum):
+    """Whether a command attempt's stdout and stderr were retained as logs."""
+
+    FULL = "full"
+    NONE = "none"
+
+
+class AttemptState(enum.StrEnum):
+    """Whether the process recording an unfinished attempt is still alive."""
+
+    RUNNING = "running"
+    ABANDONED = "abandoned"
+
+
+class RecoveryAction(enum.StrEnum):
+    """What closing an unfinished attempt had to do."""
+
+    ABANDONED = "abandoned"
+    COMPLETED = "completed"
+    CLEARED = "cleared"
 
 
 class ComparisonState(enum.StrEnum):
@@ -115,6 +139,20 @@ def _optional_string(value: object, label: str) -> str | None:
     return _string(value, label)
 
 
+def _fields(payload: object, label: str, required: frozenset[str]) -> dict:
+    """Return a payload object after checking it carries every required field.
+
+    Fields this version does not know are ignored. Within one schema version a
+    record only ever gains optional fields, so records from a newer writer
+    stay readable.
+    """
+    if not isinstance(payload, dict):
+        raise ValidationError(f"{label} payload must be an object")
+    missing = sorted(required - set(payload))
+    _require(not missing, f"{label} payload is missing fields: {', '.join(missing)}")
+    return payload
+
+
 def _integer(value: object, label: str, *, minimum: int | None = None) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValidationError(f"{label} must be an integer")
@@ -175,9 +213,60 @@ def _outcome(value: object, label: str) -> Outcome:
     try:
         return Outcome(text)
     except ValueError as exc:
-        raise ValidationError(
-            f"{label} must be one of: passed, failed, launch_failed, interrupted"
-        ) from exc
+        choices = ", ".join(item.value for item in Outcome)
+        raise ValidationError(f"{label} must be one of: {choices}") from exc
+
+
+def _output_capture(value: object, label: str) -> OutputCapture:
+    text = _string(value, label)
+    try:
+        return OutputCapture(text)
+    except ValueError as exc:
+        choices = ", ".join(item.value for item in OutputCapture)
+        raise ValidationError(f"{label} must be one of: {choices}") from exc
+
+
+def _command(payload: dict) -> tuple[tuple[str, ...], tuple[int, ...]]:
+    command_value = payload["command"]
+    _require(isinstance(command_value, list), "command must be an array")
+    _require(len(command_value) > 0, "command must not be empty")
+    command = tuple(
+        _string(token, f"command[{index}]") for index, token in enumerate(command_value)
+    )
+    masked_value = payload["masked_arguments"]
+    _require(isinstance(masked_value, list), "masked_arguments must be an array")
+    masked = tuple(
+        _integer(position, f"masked_arguments[{index}]", minimum=0)
+        for index, position in enumerate(masked_value)
+    )
+    _require(list(masked) == sorted(set(masked)), "masked_arguments must be unique and ascending")
+    for position in masked:
+        _require(
+            position < len(command) and command[position] == MASKED_ARGUMENT,
+            f"masked_arguments names command[{position}], which is not a masked token",
+        )
+    return command, masked
+
+
+def mask_command(
+    command: Sequence[str], positions: Iterable[int]
+) -> tuple[tuple[str, ...], tuple[int, ...]]:
+    """Return the command as recorded, with the tokens at *positions* masked."""
+    tokens = list(command)
+    masked = set()
+    for position in positions:
+        if (
+            isinstance(position, bool)
+            or not isinstance(position, int)
+            or not 0 <= position < len(tokens)
+        ):
+            raise ValidationError(
+                f"masked argument {position!r} is not a command token position"
+                f" (0 to {len(tokens) - 1})"
+            )
+        masked.add(position)
+        tokens[position] = MASKED_ARGUMENT
+    return tuple(tokens), tuple(sorted(masked))
 
 
 def parse_parameter(token: str) -> tuple[str, str]:
@@ -247,19 +336,40 @@ class Atom:
     id: str
     pathway_id: str
     started_at: str
-    finished_at: str
-    duration_seconds: float
+    finished_at: str | None
+    duration_seconds: float | None
     outcome: Outcome
     return_code: int | None
     launch_error_category: str | None
     declared_parameters: Mapping[str, str]
     command: tuple[str, ...]
-    stdout_log: str
-    stderr_log: str
-    stdout_bytes: int
-    stderr_bytes: int
-    stdout_sha256: str
-    stderr_sha256: str
+    stdout_log: str | None
+    stderr_log: str | None
+    stdout_bytes: int | None
+    stderr_bytes: int | None
+    stdout_sha256: str | None
+    stderr_sha256: str | None
+    output_capture: OutputCapture = OutputCapture.FULL
+    masked_arguments: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class Attempt:
+    """A command attempt recorded before launch and not yet finalized.
+
+    Its ``id`` is the identifier of the atom that finalizing it writes.
+    """
+
+    id: str
+    pathway_id: str
+    chokepoint_id: str
+    started_at: str
+    declared_parameters: Mapping[str, str]
+    command: tuple[str, ...]
+    stdout_log: str | None
+    stderr_log: str | None
+    output_capture: OutputCapture = OutputCapture.FULL
+    masked_arguments: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -275,6 +385,62 @@ class Chokepoint:
     branchable: bool
 
 
+_LOG_FIELDS = (
+    "stdout_log",
+    "stderr_log",
+    "stdout_bytes",
+    "stderr_bytes",
+    "stdout_sha256",
+    "stderr_sha256",
+)
+_DEN_FIELDS = frozenset({"id", "name", "created_at", "default_pathway_id"})
+_PATHWAY_FIELDS = frozenset(
+    {
+        "id",
+        "den_id",
+        "created_at",
+        "parent_pathway_id",
+        "source_chokepoint_id",
+        "reason",
+        "parameters",
+    }
+)
+_ATOM_FIELDS = frozenset(
+    {
+        "id",
+        "pathway_id",
+        "started_at",
+        "finished_at",
+        "duration_seconds",
+        "outcome",
+        "return_code",
+        "launch_error_category",
+        "declared_parameters",
+        "command",
+        "masked_arguments",
+        "output_capture",
+        *_LOG_FIELDS,
+    }
+)
+_ATTEMPT_FIELDS = frozenset(
+    {
+        "id",
+        "pathway_id",
+        "chokepoint_id",
+        "started_at",
+        "declared_parameters",
+        "command",
+        "masked_arguments",
+        "output_capture",
+        "stdout_log",
+        "stderr_log",
+    }
+)
+_CHOKEPOINT_FIELDS = frozenset(
+    {"id", "pathway_id", "atom_id", "created_at", "kind", "outcome", "branchable"}
+)
+
+
 def den_to_payload(den: Den) -> dict:
     return {
         "id": den.id,
@@ -285,12 +451,7 @@ def den_to_payload(den: Den) -> dict:
 
 
 def den_from_payload(payload: object) -> Den:
-    if not isinstance(payload, dict):
-        raise ValidationError("den payload must be an object")
-    _require(
-        set(payload) == {"id", "name", "created_at", "default_pathway_id"},
-        "den payload has unexpected fields",
-    )
+    payload = _fields(payload, "den", _DEN_FIELDS)
     return Den(
         id=_id(payload["id"], "den", "id"),
         name=_string(payload["name"], "name"),
@@ -312,18 +473,7 @@ def pathway_to_payload(pathway: Pathway) -> dict:
 
 
 def pathway_from_payload(payload: object) -> Pathway:
-    if not isinstance(payload, dict):
-        raise ValidationError("pathway payload must be an object")
-    expected = {
-        "id",
-        "den_id",
-        "created_at",
-        "parent_pathway_id",
-        "source_chokepoint_id",
-        "reason",
-        "parameters",
-    }
-    _require(set(payload) == expected, "pathway payload has unexpected fields")
+    payload = _fields(payload, "pathway", _PATHWAY_FIELDS)
     parent = payload["parent_pathway_id"]
     source = payload["source_chokepoint_id"]
     if parent is not None:
@@ -353,6 +503,8 @@ def atom_to_payload(atom: Atom) -> dict:
         "launch_error_category": atom.launch_error_category,
         "declared_parameters": dict(atom.declared_parameters),
         "command": list(atom.command),
+        "masked_arguments": list(atom.masked_arguments),
+        "output_capture": atom.output_capture.value,
         "stdout_log": atom.stdout_log,
         "stderr_log": atom.stderr_log,
         "stdout_bytes": atom.stdout_bytes,
@@ -363,37 +515,32 @@ def atom_to_payload(atom: Atom) -> dict:
 
 
 def atom_from_payload(payload: object) -> Atom:
-    if not isinstance(payload, dict):
-        raise ValidationError("atom payload must be an object")
-    expected = {
-        "id",
-        "pathway_id",
-        "started_at",
-        "finished_at",
-        "duration_seconds",
-        "outcome",
-        "return_code",
-        "launch_error_category",
-        "declared_parameters",
-        "command",
-        "stdout_log",
-        "stderr_log",
-        "stdout_bytes",
-        "stderr_bytes",
-        "stdout_sha256",
-        "stderr_sha256",
-    }
-    _require(set(payload) == expected, "atom payload has unexpected fields")
+    payload = _fields(payload, "atom", _ATOM_FIELDS)
     outcome = _outcome(payload["outcome"], "outcome")
     return_code = _optional_integer(payload["return_code"], "return_code")
     category = _optional_string(payload["launch_error_category"], "launch_error_category")
-    command_value = payload["command"]
-    _require(isinstance(command_value, list), "command must be an array")
-    _require(len(command_value) > 0, "command must not be empty")
-    command = tuple(
-        _string(token, f"command[{index}]") for index, token in enumerate(command_value)
+    command, masked = _command(payload)
+    capture = _output_capture(payload["output_capture"], "output_capture")
+    captured = capture is OutputCapture.FULL
+    _require(
+        captured or all(payload[name] is None for name in _LOG_FIELDS),
+        "atoms without captured output must not carry log fields",
     )
-    if outcome is Outcome.LAUNCH_FAILED:
+    finished_at: str | None = None
+    duration: float | None = None
+    if outcome is not Outcome.ABANDONED:
+        finished_at = format_timestamp(parse_timestamp(payload["finished_at"], "finished_at"))
+        duration = _number(payload["duration_seconds"], "duration_seconds")
+    if outcome is Outcome.ABANDONED:
+        _require(
+            payload["finished_at"] is None and payload["duration_seconds"] is None,
+            "abandoned atoms must not carry a finish time or duration",
+        )
+        _require(
+            return_code is None and category is None,
+            "abandoned atoms must not carry a return code or launch error category",
+        )
+    elif outcome is Outcome.LAUNCH_FAILED:
         _require(
             return_code is None and category is not None,
             "launch_failed atoms need a launch error category and no return code",
@@ -420,19 +567,63 @@ def atom_from_payload(payload: object) -> Atom:
         id=_id(payload["id"], "atom", "id"),
         pathway_id=_id(payload["pathway_id"], "pathway", "pathway_id"),
         started_at=format_timestamp(parse_timestamp(payload["started_at"], "started_at")),
-        finished_at=format_timestamp(parse_timestamp(payload["finished_at"], "finished_at")),
-        duration_seconds=_number(payload["duration_seconds"], "duration_seconds"),
+        finished_at=finished_at,
+        duration_seconds=duration,
         outcome=outcome,
         return_code=return_code,
         launch_error_category=category,
         declared_parameters=_string_mapping(payload["declared_parameters"], "declared_parameters"),
         command=command,
-        stdout_log=_string(payload["stdout_log"], "stdout_log"),
-        stderr_log=_string(payload["stderr_log"], "stderr_log"),
-        stdout_bytes=_integer(payload["stdout_bytes"], "stdout_bytes", minimum=0),
-        stderr_bytes=_integer(payload["stderr_bytes"], "stderr_bytes", minimum=0),
-        stdout_sha256=_sha256(payload["stdout_sha256"], "stdout_sha256"),
-        stderr_sha256=_sha256(payload["stderr_sha256"], "stderr_sha256"),
+        stdout_log=_string(payload["stdout_log"], "stdout_log") if captured else None,
+        stderr_log=_string(payload["stderr_log"], "stderr_log") if captured else None,
+        stdout_bytes=(
+            _integer(payload["stdout_bytes"], "stdout_bytes", minimum=0) if captured else None
+        ),
+        stderr_bytes=(
+            _integer(payload["stderr_bytes"], "stderr_bytes", minimum=0) if captured else None
+        ),
+        stdout_sha256=_sha256(payload["stdout_sha256"], "stdout_sha256") if captured else None,
+        stderr_sha256=_sha256(payload["stderr_sha256"], "stderr_sha256") if captured else None,
+        output_capture=capture,
+        masked_arguments=masked,
+    )
+
+
+def attempt_to_payload(attempt: Attempt) -> dict:
+    return {
+        "id": attempt.id,
+        "pathway_id": attempt.pathway_id,
+        "chokepoint_id": attempt.chokepoint_id,
+        "started_at": attempt.started_at,
+        "declared_parameters": dict(attempt.declared_parameters),
+        "command": list(attempt.command),
+        "masked_arguments": list(attempt.masked_arguments),
+        "output_capture": attempt.output_capture.value,
+        "stdout_log": attempt.stdout_log,
+        "stderr_log": attempt.stderr_log,
+    }
+
+
+def attempt_from_payload(payload: object) -> Attempt:
+    payload = _fields(payload, "attempt", _ATTEMPT_FIELDS)
+    command, masked = _command(payload)
+    capture = _output_capture(payload["output_capture"], "output_capture")
+    captured = capture is OutputCapture.FULL
+    _require(
+        captured or (payload["stdout_log"] is None and payload["stderr_log"] is None),
+        "attempts without captured output must not carry log paths",
+    )
+    return Attempt(
+        id=_id(payload["id"], "atom", "id"),
+        pathway_id=_id(payload["pathway_id"], "pathway", "pathway_id"),
+        chokepoint_id=_id(payload["chokepoint_id"], "chokepoint", "chokepoint_id"),
+        started_at=format_timestamp(parse_timestamp(payload["started_at"], "started_at")),
+        declared_parameters=_string_mapping(payload["declared_parameters"], "declared_parameters"),
+        command=command,
+        stdout_log=_string(payload["stdout_log"], "stdout_log") if captured else None,
+        stderr_log=_string(payload["stderr_log"], "stderr_log") if captured else None,
+        output_capture=capture,
+        masked_arguments=masked,
     )
 
 
@@ -449,18 +640,7 @@ def chokepoint_to_payload(chokepoint: Chokepoint) -> dict:
 
 
 def chokepoint_from_payload(payload: object) -> Chokepoint:
-    if not isinstance(payload, dict):
-        raise ValidationError("chokepoint payload must be an object")
-    expected = {
-        "id",
-        "pathway_id",
-        "atom_id",
-        "created_at",
-        "kind",
-        "outcome",
-        "branchable",
-    }
-    _require(set(payload) == expected, "chokepoint payload has unexpected fields")
+    payload = _fields(payload, "chokepoint", _CHOKEPOINT_FIELDS)
     kind = _string(payload["kind"], "kind")
     _require(kind == TERMINAL_KIND, f"kind must be {TERMINAL_KIND!r}")
     return Chokepoint(
@@ -482,7 +662,7 @@ class RunSummary:
     pathway_id: str
     outcome: Outcome
     started_at: str
-    duration_seconds: float
+    duration_seconds: float | None
     return_code: int | None
 
     def to_dict(self) -> dict:
