@@ -49,6 +49,10 @@ class FrozenLedgerTests(unittest.TestCase):
             (report.pathways, report.atoms, report.chokepoints, report.logs_checked), (2, 5, 5, 8)
         )
         self.assertEqual((report.running_attempts, report.abandoned_attempts), ((), ()))
+        self.assertEqual(len(report.manifest), 13)
+        self.assertEqual(
+            report.digest, "db93479659913104ed914d9e290cb0625808d1a1b7d9b221fb6a946c961ca570"
+        )
         self.assertEqual(self.store.list_attempts(), [])
         self.assertEqual(ocura_oss.recover(self.root), ())
 

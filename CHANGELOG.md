@@ -23,6 +23,15 @@ This file records user-visible changes to Ocura OSS.
   records `output_capture: none` instead of log paths.
 - Add `run --mask-arg POSITION` and `run(masked_arguments=[...])` to store a placeholder for
   chosen command tokens while the command still receives the real values.
+- Add `run --substitute` and `run(substitute=True)` to replace `{KEY}` in command tokens
+  with declared or pathway parameter values and record every parameter used, so one
+  declaration both labels and configures a run.
+- Add opt-in launch context: `run --context` records the platform and the git revision and
+  dirty state, and `run --context-file PATH` records a file's size and SHA-256. Nothing is
+  queried, executed, or read for context unless requested.
+- Add `ocura-oss manifest`, `verify --against FILE`, and `verify(against=...)`. A manifest
+  kept outside the state detects records later rewritten together with their checksums.
+  `verify` also reports a digest of the manifest.
 - State how the format evolves: readers ignore payload fields they do not recognize, so a
   schema version can gain optional fields without another break.
 - Publish releases from GitHub Actions through PyPI Trusted Publishing.

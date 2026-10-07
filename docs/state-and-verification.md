@@ -41,7 +41,7 @@ Each JSON record contains an envelope:
 }
 ```
 
-The checksum covers the schema version, kind, and canonical payload. It provides local change detection. It is not an authenticated signature and does not establish authorship.
+The checksum covers the schema version, kind, and canonical payload. It provides local change detection. It is not an authenticated signature and does not establish authorship: anyone who can write the directory can replace a record and its checksum together. A [retained manifest](#retained-manifests) detects that.
 
 ## Format compatibility
 
@@ -135,6 +135,26 @@ Automatic source selection for `compare()` requires the complete state to verify
 
 Verification establishes consistency among local records and logs. It does not capture or prove the external conditions needed to reproduce a command.
 
+### Retained manifests
+
+When the state is intact, verification also produces a manifest and a digest:
+
+- The manifest has one `KIND ID CHECKSUM` line for every verified record, sorted. `ocura-oss manifest` prints it, and `StateVerification.manifest` holds it.
+- The digest is the SHA-256 of those lines, each terminated by a newline. `verify` reports it, and `StateVerification.digest` holds it.
+
+An atom's checksum covers its recorded log sizes and digests, and verification has just matched the logs to them, so a manifest line for an atom also pins that run's output.
+
+Checksums stored inside `.ocura-oss/` cannot show that a record was rewritten by someone able to write there. A manifest kept elsewhere can. Save it where this state's writers cannot change it, such as a commit in another repository or a build artifact, then pass it back:
+
+```console
+ocura-oss manifest > ../trusted/experiment.manifest
+ocura-oss verify --against ../trusted/experiment.manifest
+```
+
+Every retained entry must still be present with the same checksum. Records added since are allowed, so a manifest stays useful while work continues. A rewritten record, a replaced log, or a removed run is reported as a retained record that is missing or was changed.
+
+The protection is exactly as strong as the place the manifest is kept. A manifest stored beside the ledger can be replaced along with it. The digest alone identifies one exact set of records; it changes with every new run, so use it to confirm that two copies of a finished ledger match, and use the manifest to check a ledger that is still growing.
+
 ## Reading verified output
 
 `Store.read_verified_log(atom_id, stream="stdout")` loads and validates the stored
@@ -157,7 +177,26 @@ See the [Python API](python-api.md#storeread_verified_log) for usage and errors.
 
 Atoms retain command arguments, outcomes, timing, return codes, declared parameters, log paths, byte counts, and log digests. Logs retain command output. Pathways retain branch reasons and effective declared parameters. An unfinished attempt retains the same command arguments and declared parameters as the atom it becomes.
 
-Environment values are inherited by the child process but are not serialized. Dependency versions, source revisions, workspace contents, process memory, network activity, and external-system state are not recorded.
+Environment values are inherited by the child process but are not serialized. Dependency versions, workspace contents, process memory, network activity, and external-system state are not recorded. The source revision is recorded only when [launch context](#optional-launch-context) is requested.
+
+### Optional launch context
+
+A run records nothing about its surroundings unless asked. Two options add a `context` object to the attempt and the atom:
+
+| Option | Records |
+| --- | --- |
+| `run --context`, or `context=True` | `platform`: the operating system name, release, and machine type. `git`: the checked-out revision and whether the work tree differs from it, or null when the project root is not inside a work tree with at least one commit or git is unavailable |
+| `run --context-file PATH`, or `context_files=[...]` | `files`: the size and SHA-256 of each named file, read just before launch. A relative path is resolved against the project root. A file that cannot be read stops the run before the command launches |
+
+The work tree is `dirty` when it has modified or untracked files other than `.ocura-oss/` itself. Reading git state runs `git` twice in the project root; that is the only extra process, and only with `--context`.
+
+Context is a description, not a guarantee:
+
+- It records the moment of launch. Verification does not recheck it, and a named file may change afterward.
+- It does not record installed package versions. Those belong to whichever interpreter the command uses, which need not be the one running Ocura OSS. Name a lock file with `--context-file` to pin them.
+- A revision and file digests narrow down what ran. They do not make a command reproducible or restore a workspace.
+
+The `context` field is absent from a record written without these options.
 
 ### Keeping sensitive values out of records
 
@@ -173,7 +212,7 @@ Two options limit what a run stores. Both are stated in the record, so a reader 
 These options are explicit, and nothing is detected automatically:
 
 - Masking covers command tokens in records. It does not alter output: a command that prints a masked value still writes it to a captured log. Combine it with `--no-capture` when that matters.
-- Declared parameters and branch reasons are stored as given. Keep secrets out of them.
+- Declared parameters and branch reasons are stored as given. Keep secrets out of them. That includes any parameter passed to the command with `--substitute`: its value is recorded as a label even when its command token is masked.
 - A masked value remains visible to the operating system as an argument of the running process.
 
 ## Execution boundary

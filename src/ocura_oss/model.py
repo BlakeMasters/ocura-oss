@@ -22,6 +22,8 @@ MASKED_ARGUMENT = "<masked>"
 _ID_PATTERN = re.compile(r"^(den|pathway|atom|chokepoint)-([0-9a-f]{32})$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _PARAMETER_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
+_PLACEHOLDER_PATTERN = re.compile(r"\{\{|\}\}|\{([A-Za-z_][A-Za-z0-9_.-]*)\}|[{}]")
+_GIT_REVISION_PATTERN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 _ID_KINDS = ("den", "pathway", "atom", "chokepoint")
 
@@ -269,6 +271,34 @@ def mask_command(
     return tuple(tokens), tuple(sorted(masked))
 
 
+def substitute_parameters(
+    command: Sequence[str], parameters: Mapping[str, str]
+) -> tuple[tuple[str, ...], dict[str, str]]:
+    """Replace ``{KEY}`` in command tokens with parameter values.
+
+    ``{{`` and ``}}`` stand for literal braces. Returns the expanded command
+    and the parameters it used, so the recorded labels match what was run.
+    """
+    used: dict[str, str] = {}
+
+    def expand(match: re.Match[str]) -> str:
+        text = match.group(0)
+        if text in ("{{", "}}"):
+            return text[0]
+        key = match.group(1)
+        if key is None:
+            raise ValidationError(
+                f"unbalanced brace in command token {match.string!r};"
+                " write {{ or }} for a literal brace"
+            )
+        if key not in parameters:
+            raise ValidationError(f"command placeholder {{{key}}} has no parameter value")
+        used[key] = parameters[key]
+        return parameters[key]
+
+    return tuple(_PLACEHOLDER_PATTERN.sub(expand, token) for token in command), used
+
+
 def parse_parameter(token: str) -> tuple[str, str]:
     if not isinstance(token, str):
         raise ValidationError("parameter declarations must be strings")
@@ -330,6 +360,28 @@ class Pathway:
 
 
 @dataclass(frozen=True)
+class FileDigest:
+    """Size and SHA-256 digest of one file named for context capture."""
+
+    bytes: int
+    sha256: str
+
+
+@dataclass(frozen=True)
+class RunContext:
+    """Facts about where a command attempt started, captured only on request.
+
+    ``platform`` and the git fields are ``None`` when they were not requested
+    or, for git, when the project root is not inside a readable work tree.
+    """
+
+    platform: Mapping[str, str] | None
+    git_revision: str | None
+    git_dirty: bool | None
+    files: Mapping[str, FileDigest]
+
+
+@dataclass(frozen=True)
 class Atom:
     """One recorded command attempt and its referenced output logs."""
 
@@ -351,6 +403,7 @@ class Atom:
     stderr_sha256: str | None
     output_capture: OutputCapture = OutputCapture.FULL
     masked_arguments: tuple[int, ...] = ()
+    context: RunContext | None = None
 
 
 @dataclass(frozen=True)
@@ -370,6 +423,7 @@ class Attempt:
     stderr_log: str | None
     output_capture: OutputCapture = OutputCapture.FULL
     masked_arguments: tuple[int, ...] = ()
+    context: RunContext | None = None
 
 
 @dataclass(frozen=True)
@@ -439,6 +493,66 @@ _ATTEMPT_FIELDS = frozenset(
 _CHOKEPOINT_FIELDS = frozenset(
     {"id", "pathway_id", "atom_id", "created_at", "kind", "outcome", "branchable"}
 )
+
+
+def _context_entry(context: RunContext | None) -> dict:
+    """Return the optional ``context`` payload field, absent when not captured."""
+    if context is None:
+        return {}
+    git = (
+        None
+        if context.git_revision is None
+        else {"revision": context.git_revision, "dirty": context.git_dirty}
+    )
+    return {
+        "context": {
+            "platform": None if context.platform is None else dict(context.platform),
+            "git": git,
+            "files": {
+                path: {"bytes": item.bytes, "sha256": item.sha256}
+                for path, item in sorted(context.files.items())
+            },
+        }
+    }
+
+
+def _context(value: object) -> RunContext | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValidationError("context must be an object")
+    platform_value = value.get("platform")
+    platform: dict[str, str] | None = None
+    if platform_value is not None:
+        _require(isinstance(platform_value, dict), "context.platform must be an object")
+        platform = {
+            _string(key, "context.platform key"): _string(
+                item, f"context.platform[{key}]", allow_empty=True
+            )
+            for key, item in platform_value.items()
+        }
+    git_value = value.get("git")
+    revision: str | None = None
+    dirty: bool | None = None
+    if git_value is not None:
+        _require(isinstance(git_value, dict), "context.git must be an object")
+        revision = _string(git_value.get("revision"), "context.git.revision")
+        _require(
+            _GIT_REVISION_PATTERN.fullmatch(revision) is not None,
+            "context.git.revision must be a full hexadecimal object name",
+        )
+        dirty = _boolean(git_value.get("dirty"), "context.git.dirty")
+    files_value = value.get("files", {})
+    _require(isinstance(files_value, dict), "context.files must be an object")
+    files: dict[str, FileDigest] = {}
+    for path, item in files_value.items():
+        label = f"context.files[{path}]"
+        _require(isinstance(item, dict), f"{label} must be an object")
+        files[_string(path, "context.files key")] = FileDigest(
+            bytes=_integer(item.get("bytes"), f"{label}.bytes", minimum=0),
+            sha256=_sha256(item.get("sha256"), f"{label}.sha256"),
+        )
+    return RunContext(platform=platform, git_revision=revision, git_dirty=dirty, files=files)
 
 
 def den_to_payload(den: Den) -> dict:
@@ -511,6 +625,7 @@ def atom_to_payload(atom: Atom) -> dict:
         "stderr_bytes": atom.stderr_bytes,
         "stdout_sha256": atom.stdout_sha256,
         "stderr_sha256": atom.stderr_sha256,
+        **_context_entry(atom.context),
     }
 
 
@@ -586,6 +701,7 @@ def atom_from_payload(payload: object) -> Atom:
         stderr_sha256=_sha256(payload["stderr_sha256"], "stderr_sha256") if captured else None,
         output_capture=capture,
         masked_arguments=masked,
+        context=_context(payload.get("context")),
     )
 
 
@@ -601,6 +717,7 @@ def attempt_to_payload(attempt: Attempt) -> dict:
         "output_capture": attempt.output_capture.value,
         "stdout_log": attempt.stdout_log,
         "stderr_log": attempt.stderr_log,
+        **_context_entry(attempt.context),
     }
 
 
@@ -624,6 +741,7 @@ def attempt_from_payload(payload: object) -> Attempt:
         stderr_log=_string(payload["stderr_log"], "stderr_log") if captured else None,
         output_capture=capture,
         masked_arguments=masked,
+        context=_context(payload.get("context")),
     )
 
 

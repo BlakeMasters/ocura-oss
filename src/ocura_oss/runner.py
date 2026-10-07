@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import os
 import subprocess
 import sys
 import threading
@@ -15,6 +16,7 @@ from dataclasses import dataclass
 from typing import BinaryIO
 
 from ocura_oss import model
+from ocura_oss.context import capture as capture_context
 from ocura_oss.store import STATE_DIR_NAME, Store, StoreError, size_and_sha256
 
 _PUMP_CHUNK = 65536
@@ -52,6 +54,9 @@ def run_command(
     mirror: bool = False,
     capture: bool = True,
     masked_arguments: Iterable[int] = (),
+    substitute: bool = False,
+    context: bool = False,
+    context_files: Iterable[os.PathLike[str] | str] = (),
     now: Callable[[], datetime.datetime] | None = None,
     monotonic: Callable[[], float] | None = None,
 ) -> RunExecution:
@@ -67,6 +72,12 @@ def run_command(
     positions whose values are replaced by a placeholder in every record; the
     command itself still receives them.
 
+    When ``substitute`` is true, ``{KEY}`` in a command token is replaced by
+    that parameter's value, taken from the declared parameters and then the
+    pathway's, and every parameter used is recorded as a label of the run.
+    ``context`` records the platform and git state at launch, and
+    ``context_files`` records the size and digest of each named file.
+
     The attempt is journaled before the command launches. A Ctrl+C
     interruption is recorded as an ``interrupted`` atom and chokepoint. If
     this process stops before it can finalize, the journal entry remains and
@@ -80,11 +91,15 @@ def run_command(
     if not tokens or not all(isinstance(token, str) and token for token in tokens):
         raise StoreError("command must be a nonempty sequence of nonempty strings")
     parameters = model.validate_parameters(declared_parameters)
+    pathway = store.load_pathway(pathway_id)
     try:
+        if substitute:
+            tokens, used = model.substitute_parameters(tokens, {**pathway.parameters, **parameters})
+            parameters = {**parameters, **used}
         recorded_command, masked = model.mask_command(tokens, masked_arguments)
     except model.ValidationError as exc:
         raise StoreError(str(exc)) from exc
-    pathway = store.load_pathway(pathway_id)
+    run_context = capture_context(store.root, environment=context, files=context_files)
 
     atom_id = model.make_id("atom")
     chokepoint_id = model.make_id("chokepoint")
@@ -106,6 +121,7 @@ def run_command(
         stderr_log=stderr_log,
         output_capture=output_capture,
         masked_arguments=masked,
+        context=run_context,
     )
     with store._recording(attempt), contextlib.ExitStack() as logs:
         stdout_handle: BinaryIO | None = None
@@ -165,6 +181,7 @@ def run_command(
             stderr_sha256=stderr_digest,
             output_capture=output_capture,
             masked_arguments=masked,
+            context=run_context,
         )
         store._save_atom(atom)
         chokepoint = model.Chokepoint(

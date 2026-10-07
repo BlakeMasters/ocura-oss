@@ -11,7 +11,7 @@ import json
 import os
 import tempfile
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal, TypeVar
@@ -36,6 +36,10 @@ class StateVerification:
     recording; they are not problems. ``abandoned_attempts`` names attempts
     whose recording process stopped first; each also appears in ``problems``
     until :meth:`Store.recover` closes it.
+
+    When the state is intact, ``manifest`` holds one ``KIND ID CHECKSUM`` line
+    for every verified record, sorted, and ``digest`` is the SHA-256 of those
+    lines joined and terminated by newlines. Both are empty otherwise.
     """
 
     pathways: int
@@ -45,6 +49,8 @@ class StateVerification:
     problems: tuple[tuple[str, str], ...]
     running_attempts: tuple[str, ...] = ()
     abandoned_attempts: tuple[str, ...] = ()
+    manifest: tuple[str, ...] = ()
+    digest: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -329,6 +335,7 @@ class Store:
             stderr_sha256=measured[1][1] if captured else None,
             output_capture=attempt.output_capture,
             masked_arguments=attempt.masked_arguments,
+            context=attempt.context,
         )
 
     def list_pathways(self) -> list[model.Pathway]:
@@ -423,7 +430,7 @@ class Store:
             raise StoreError(f"atom {atom_id} log checksum mismatch for {relative}")
         return candidate
 
-    def verify_state(self) -> StateVerification:
+    def verify_state(self, *, against: Iterable[str] | None = None) -> StateVerification:
         """Verify every state record and every log referenced by a valid atom.
 
         Also reports files under ``.ocura-oss/logs/`` that no record references,
@@ -437,20 +444,29 @@ class Store:
         An attempt a live process is still recording is reported in
         ``running_attempts`` and is not a problem; its logs are not checked
         until it is finalized.
+
+        *against* is a manifest retained from an earlier verification. Each of
+        its entries must still be present unchanged; records added since are
+        allowed. Kept somewhere this state's writers cannot reach, it detects
+        records that were later rewritten together with their checksums.
         """
+        retained = _parse_manifest(against)
         den = self.load_den()
         problems: list[tuple[str, str]] = []
+        manifest = [_manifest_line("den", den.id, self._read_envelope(self.den_path, "den"))]
         # A run writes its attempt before its logs and its atom before its
         # chokepoint, and removes the attempt last. Reading in that same order
         # never mistakes a run in progress for damage.
         log_entries = sorted(self.logs_dir.iterdir()) if self.logs_dir.is_dir() else []
         attempts = self._scan_attempts(problems)
         pathways = self._scan_records(
-            self.pathways_dir, "pathway", model.pathway_from_payload, problems
+            self.pathways_dir, "pathway", model.pathway_from_payload, problems, manifest
         )
-        atoms = self._scan_records(self.atoms_dir, "atom", model.atom_from_payload, problems)
+        atoms = self._scan_records(
+            self.atoms_dir, "atom", model.atom_from_payload, problems, manifest
+        )
         chokepoints = self._scan_records(
-            self.chokepoints_dir, "chokepoint", model.chokepoint_from_payload, problems
+            self.chokepoints_dir, "chokepoint", model.chokepoint_from_payload, problems, manifest
         )
         for pathway in pathways:
             try:
@@ -500,6 +516,15 @@ class Store:
         )
         if all(item.id != den.default_pathway_id for item in pathways):
             problems.append(("den.json", "default pathway record is missing"))
+        manifest.sort()
+        current = set(manifest)
+        for entry in retained:
+            if entry not in current:
+                kind, record_id, _checksum = entry.split(" ")
+                problems.append(
+                    (f"{record_id}.json", f"retained {kind} record is missing or was changed")
+                )
+        intact = not problems
         return StateVerification(
             pathways=len(pathways),
             atoms=len(atoms),
@@ -508,6 +533,8 @@ class Store:
             problems=tuple(problems),
             running_attempts=tuple(running),
             abandoned_attempts=tuple(abandoned),
+            manifest=tuple(manifest) if intact else (),
+            digest=manifest_digest(manifest) if intact else None,
         )
 
     def initialize_state(
@@ -646,7 +673,13 @@ class Store:
             records.append(self._load_listed(path, kind, converter))
         return records
 
-    def _load_listed(self, path: Path, kind: str, converter: Callable[[dict], _T]) -> _T:
+    def _load_listed(
+        self,
+        path: Path,
+        kind: str,
+        converter: Callable[[dict], _T],
+        manifest: list[str] | None = None,
+    ) -> _T:
         try:
             payload = self._read_envelope(path, kind)
         except StoreError as exc:
@@ -657,6 +690,8 @@ class Store:
             raise StoreError(f"invalid {kind} record {path.name}: {exc}") from exc
         if getattr(record, "id", None) != path.stem:
             raise StoreError(f"{kind} record {path.name} payload id does not match its filename")
+        if manifest is not None:
+            manifest.append(_manifest_line(kind, path.stem, payload))
         return record
 
     def _scan_records(
@@ -665,6 +700,7 @@ class Store:
         kind: str,
         converter: Callable[[dict], _T],
         problems: list[tuple[str, str]],
+        manifest: list[str] | None = None,
     ) -> list[_T]:
         """Collect valid records and report invalid ones instead of raising."""
         records: list[_T] = []
@@ -672,7 +708,7 @@ class Store:
             return records
         for path in sorted(directory.glob("*.json")):
             try:
-                records.append(self._load_listed(path, kind, converter))
+                records.append(self._load_listed(path, kind, converter, manifest))
             except StoreError as exc:
                 problems.append((path.name, str(exc)))
         return records
@@ -781,6 +817,36 @@ def size_and_sha256(path: Path) -> tuple[int, str]:
 
 def sha256_of_file(path: Path) -> str:
     return size_and_sha256(path)[1]
+
+
+def manifest_digest(entries: Iterable[str]) -> str:
+    """Return the SHA-256 of manifest entries, sorted and newline-terminated."""
+    text = "".join(f"{entry}\n" for entry in sorted(entries))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _manifest_line(kind: str, record_id: str, payload: dict) -> str:
+    checksum = model.checksum_for(model.SCHEMA_VERSION, kind, payload)["value"]
+    return f"{kind} {record_id} {checksum}"
+
+
+def _parse_manifest(lines: Iterable[str] | None) -> list[str]:
+    """Normalize retained manifest lines; blank lines and ``#`` comments are skipped."""
+    entries: list[str] = []
+    for raw in lines or ():
+        line = raw.strip() if isinstance(raw, str) else ""
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(" ")
+        if (
+            len(parts) != 3
+            or not model.is_valid_id(parts[1], parts[0])
+            or len(parts[2]) != 64
+            or set(parts[2]) - set("0123456789abcdef")
+        ):
+            raise StoreError(f"malformed manifest entry: {line!r}")
+        entries.append(line)
+    return entries
 
 
 def _recorded_logs(atom: model.Atom) -> list[tuple[str, int, str]]:
