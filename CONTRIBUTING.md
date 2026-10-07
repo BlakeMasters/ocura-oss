@@ -29,12 +29,16 @@ Run these checks before opening a pull request:
 
 ```console
 python -m unittest discover -s tests
-python -m ruff check src tests
-python -m ruff format --check src tests
+python -m ruff check src tests tools
+python -m ruff format --check src tests tools
 python -m mypy src/ocura_oss
+python tools/check_release.py
 python -m build
 python -m twine check dist/*
 ```
+
+Continuous integration runs the tests on Linux, macOS, and Windows for each supported
+Python version, and runs the remaining checks once.
 
 The test suite uses `unittest`; pytest is not required. Please add or update tests when behavior changes, and update the README and changelog when a public command or record changes.
 
@@ -49,3 +53,21 @@ The core package stays dependency-free.
 A pull request should explain what changed, why the change belongs in this research package, and how it was verified. Keep unrelated cleanup separate so reviewers can evaluate the behavior directly.
 
 Contributions accepted into this repository are released under MPL-2.0. Only submit work you have the right to contribute.
+
+## Releases
+
+The package version is declared once, as `__version__` in `src/ocura_oss/__init__.py`.
+The newest `CHANGELOG.md` heading and the `Version X.Y.Z.` line in each reference
+document must name the same version; `python tools/check_release.py` reports any
+that do not. A changelog entry may be dated `Unreleased` until its release.
+
+To release, a maintainer:
+
+1. Sets the version, the changelog heading and date, and the document version lines,
+   then merges that change to `main`.
+2. Tags the merged commit `vX.Y.Z` and pushes the tag.
+
+The release workflow then repeats the checks against the tag, builds the wheel and
+source distribution, publishes them to PyPI through Trusted Publishing, and creates
+the GitHub release from the changelog entry. It also fails if the wheel gains a
+runtime dependency, contains files outside the package, or exceeds its size budget.
