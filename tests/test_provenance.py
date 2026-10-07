@@ -315,6 +315,23 @@ class ManifestTests(ProvenanceTestCase):
         self.assertEqual((code, stdout), (2, ""))
         self.assertIn("error:", stderr)
 
+    def test_retained_file_written_by_a_shell_redirect_is_read(self):
+        text = "".join(f"{entry}\r\n" for entry in ocura_oss.verify(self.root).manifest)
+        retained = Path(self._temporary.name) / "retained.manifest"
+        for encoding in ("utf-8", "utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
+            with self.subTest(encoding=encoding):
+                mark = {"utf-16-le": b"\xff\xfe", "utf-16-be": b"\xfe\xff"}.get(encoding, b"")
+                retained.write_bytes(mark + text.encode(encoding))
+                code, stdout, stderr = self.invoke("verify", "--against", str(retained))
+                self.assertEqual(code, 0, stdout + stderr)
+
+    def test_retained_file_that_is_not_text_is_an_error(self):
+        retained = Path(self._temporary.name) / "retained.manifest"
+        retained.write_bytes(b"den \xff\xff\xff")
+        code, stdout, stderr = self.invoke("verify", "--against", str(retained))
+        self.assertEqual((code, stdout), (2, ""))
+        self.assertIn("is not UTF-8 or UTF-16 text", stderr)
+
 
 class ContextTests(ProvenanceTestCase):
     def run_plain(self, **options):

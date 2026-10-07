@@ -687,9 +687,7 @@ def _run_phrase(summary: model.RunSummary | None) -> str:
 
 def _verify(args: argparse.Namespace) -> int:
     state = _open_store(args.root)
-    retained = None
-    if args.against is not None:
-        retained = Path(args.against).read_text(encoding="utf-8").splitlines()
+    retained = None if args.against is None else _read_manifest(args.against)
     report = state.verify_state(against=retained)
     den = state.load_den()
     status = "ok" if report.ok else "failed"
@@ -728,6 +726,16 @@ def _verify(args: argparse.Namespace) -> int:
         print(f"digest: {report.digest}")
     print(f"integrity: {status}")
     return EXIT_OK if report.ok else EXIT_INVALID
+
+
+def _read_manifest(location: str) -> list[str]:
+    raw = Path(location).read_bytes()
+    # Windows PowerShell writes redirected output as UTF-16, or as UTF-8 with a mark.
+    encoding = "utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig"
+    try:
+        return raw.decode(encoding).splitlines()
+    except UnicodeDecodeError as exc:
+        raise StoreError(f"manifest {location} is not UTF-8 or UTF-16 text") from exc
 
 
 def _manifest(args: argparse.Namespace) -> int:
