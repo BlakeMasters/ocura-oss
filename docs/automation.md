@@ -18,7 +18,8 @@ variations, with reasons, outputs, and verification.
 All invocations must use the intended `--root`. The returned IDs connect the steps
 without scraping text. Parameters label the record; set actual command arguments
 separately, or pass `--substitute` and write `{KEY}` in the command so one
-declaration does both. Handle nonzero exits: `run` still returns a recorded result for a failed
+declaration does both. A program that builds the argument list itself needs no
+quoting; a PowerShell command line must quote the placeholder. Handle nonzero exits: `run` still returns a recorded result for a failed
 command, interruption, or launch failure. See [CLI](cli.md).
 
 If a `run` process is killed before it returns a result, its attempt remains

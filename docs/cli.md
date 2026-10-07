@@ -40,7 +40,7 @@ Run `ocura-oss COMMAND --help` for command-specific help.
 
 `--param KEY=VALUE` records a string label. The option is repeatable. Keys must begin with a letter or underscore and may then contain letters, digits, underscores, periods, or hyphens. Keys and values must not be empty. A key may appear only once in one invocation.
 
-Declared parameters do not configure the child process. Pass process arguments after `--` in `run`. To declare a value once and also pass it, use `run --substitute` and write `{KEY}` in the command.
+Declared parameters do not configure the child process. Pass process arguments after `--` in `run`. To declare a value once and also pass it, use `run --substitute` and write `{KEY}` in the command, quoted in PowerShell.
 
 ### JSON output
 
@@ -136,7 +136,7 @@ With `--no-capture`, no log files are written. Output still streams to the termi
 
 `--mask-arg POSITION` counts `COMMAND` tokens from zero, so position 0 is the executable. The command receives the real token; the attempt and atom records store `<masked>` there and list the position. Masking does not alter output, so a command that prints the value still writes it to a captured log. A position outside `COMMAND` is rejected before anything runs.
 
-With `--substitute`, each `{KEY}` in a `COMMAND` token is replaced by that parameter's value before the command launches. A value comes from this run's `--param` declarations first and then from the pathway's effective parameters, so a run on a branch can use the branch's values without restating them. Every parameter used this way is recorded as a declared parameter of the run, and the recorded command is the substituted one. Write `{{` or `}}` for a literal brace. A placeholder with no value, or an unbalanced brace, is rejected before anything runs. Without `--substitute`, braces are passed through untouched.
+With `--substitute`, each `{KEY}` in a `COMMAND` token is replaced by that parameter's value before the command launches. A value comes from this run's `--param` declarations first and then from the pathway's effective parameters, so a run on a branch can use the branch's values without restating them. Every parameter used this way is recorded as a declared parameter of the run, and the recorded command is the substituted one. Write `{{` or `}}` for a literal brace. A placeholder with no value, or an unbalanced brace, is rejected before anything runs. Without `--substitute`, braces are passed through untouched. Quote a placeholder, as in `"{batch}"`, when the shell is PowerShell: it reads bare braces as a script block and does not pass them to the command.
 
 `--context` and `--context-file` add an optional `context` object to the record; see [optional launch context](state-and-verification.md#optional-launch-context). Neither runs or reads anything unless it is present.
 
@@ -193,7 +193,7 @@ ocura-oss run --pathway pathway-<id> --param batch=4 --quiet -- python script.py
 Declare a value once and pass it to the command:
 
 ```console
-ocura-oss run --param batch=4 --substitute -- python train.py --batch {batch}
+ocura-oss run --param batch=4 --substitute -- python train.py --batch "{batch}"
 ```
 
 Record the revision, the platform, and the digest of a lock file with the run:

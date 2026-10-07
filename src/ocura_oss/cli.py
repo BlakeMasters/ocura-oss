@@ -118,7 +118,7 @@ def _build_parser() -> argparse.ArgumentParser:
             " for a command token that must not be recorded.\n"
             "With --substitute, write {KEY} in COMMAND to pass a parameter's value"
             " and record it from one declaration: --param batch=4 --substitute --"
-            " python train.py --batch {batch}.\n"
+            ' python train.py --batch "{batch}". Quote the placeholder in PowerShell.\n'
             "Exit codes: 0 passed, 1 command failed or was interrupted,"
             " 3 could not launch; every attempt produces a terminal chokepoint."
         ),
