@@ -15,7 +15,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import BinaryIO
 
-from ocura_oss import model
+from ocura_oss import model, supervise
 from ocura_oss.context import capture as capture_context
 from ocura_oss.store import STATE_DIR_NAME, Store, StoreError, size_and_sha256
 
@@ -80,9 +80,11 @@ def run_command(
     ``context_files`` records the size and digest of each named file.
 
     The attempt is journaled before the command launches. A Ctrl+C
-    interruption is recorded as an ``interrupted`` atom and chokepoint. If
-    this process stops before it can finalize, the journal entry remains and
-    :meth:`Store.recover` closes the attempt as ``abandoned``.
+    interruption stops the command and is recorded as an ``interrupted``
+    atom and chokepoint. If this process stops before it can finalize, the
+    journal entry remains and :meth:`Store.recover` closes the attempt as
+    ``abandoned``; on Windows and Linux the command is then ended by the
+    operating system, as :mod:`ocura_oss.supervise` describes.
     """
     clock = now or model.utc_now
     counter = monotonic or time.monotonic
@@ -219,6 +221,7 @@ def _execute(
         if hasattr(stream, "flush"):
             stream.flush()
 
+    tether = supervise.Tether()
     try:
         process = subprocess.Popen(  # noqa: S603 - argv list, shell=False
             list(tokens),
@@ -226,11 +229,14 @@ def _execute(
             stdout=subprocess.PIPE if mirror else (stdout_handle or subprocess.DEVNULL),
             stderr=subprocess.PIPE if mirror else (stderr_handle or subprocess.DEVNULL),
             shell=False,
+            **tether.popen_options(),
         )
     except (OSError, ValueError) as exc:
         return None, categorize_launch_error(exc), False
+    tether.attach(process)
 
     interrupted = False
+    finished = False
     return_code: int | None = None
     pumps: list[threading.Thread] = []
     if mirror:
@@ -252,6 +258,7 @@ def _execute(
         while True:
             try:
                 return_code = process.wait(timeout=0.05)
+                finished = True
                 break
             except subprocess.TimeoutExpired:
                 continue
@@ -261,6 +268,8 @@ def _execute(
                 return_code = None
                 break
     finally:
+        # First, so that nothing the command started still holds the output pipes.
+        tether.release(command_finished=finished)
         for thread in pumps:
             thread.join(timeout=_STOP_TIMEOUT)
         for stream in (process.stdout, process.stderr):

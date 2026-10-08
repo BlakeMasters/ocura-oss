@@ -572,7 +572,7 @@ class KilledRecorderTests(ProcessTestCase):
         finally:
             stop(recorder)
             if command_pid is not None:
-                # The command outlives its killed recorder; stop it before recovery.
+                # Where the command outlives its killed recorder, stop it before recovery.
                 with contextlib.suppress(OSError):
                     os.kill(command_pid, signal.SIGTERM)
 

@@ -158,7 +158,7 @@ One run produces:
 
 The attempt is journaled under `.ocura-oss/attempts/` before the command launches, and that entry is removed once the atom and chokepoint are written.
 
-A passing command records `passed`. A nonzero return code records `failed`. A launch error records `launch_failed`. The first Ctrl+C records `interrupted` with partial output retained. A second Ctrl+C exits immediately; so does a killed `run` process. Either leaves the attempt unfinished until [`recover`](#recover) closes it as `abandoned`. The command itself may still be running at that point: Ocura OSS does not stop it.
+A passing command records `passed`. A nonzero return code records `failed`. A launch error records `launch_failed`. The first Ctrl+C stops the command and records `interrupted` with partial output retained. So does a request to stop the `run` process: `SIGTERM` or `SIGHUP` on Linux and macOS, Ctrl+Break on Windows. A second Ctrl+C exits immediately; so does a killed `run` process. Either leaves the attempt unfinished until [`recover`](#recover) closes it as `abandoned`. The operating system then ends the command on Windows and Linux; on macOS the command keeps running. See [when the recorder stops](state-and-verification.md#when-the-recorder-stops).
 
 #### Text output
 

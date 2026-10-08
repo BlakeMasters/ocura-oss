@@ -23,7 +23,7 @@ runs in a new project, especially for local development:
   server, database, account, or configuration file. Every command accepts `--json`
   and returns a documented exit code, so an AI agent with a shell can do the setup
   and run the whole workflow.
-- **Easy to modify.** The whole package is eleven modules, about 4,000 lines of
+- **Easy to modify.** The whole package is twelve modules, about 4,100 lines of
   typed Python, and its records are plain JSON files. You or an agent can read all
   of it and change it to fit your workflow, and the Apache-2.0 license does not
   require you to publish your changes.
@@ -40,6 +40,10 @@ project, so deleting that directory removes all of it.
   one record.
 - **A run on a branch records the branch's parameters.** The child `run` no longer
   repeats them. A `--param` on the run still replaces the value for its key.
+- **Stopping the recorder stops the command.** `ocura-oss run` handles `SIGTERM`,
+  `SIGHUP`, and Ctrl+Break like Ctrl+C and records the run as `interrupted`. If
+  the recorder is killed outright, Windows and Linux end the command; on macOS it
+  keeps running.
 - **The first error says what to do.** A command run where there is no state names
   `ocura-oss init`, or the directory above that already holds state.
 
@@ -134,8 +138,9 @@ the command.
 
 Omit `--json` for terminal output. By default, `run` streams the command's output
 while retaining stdout and stderr logs; `--json` or `--quiet` keeps that output in
-the logs without streaming. A first Ctrl+C records an interrupted attempt; a
-second exits immediately and leaves the attempt for `ocura-oss recover` to close.
+the logs without streaming. A first Ctrl+C, or a `SIGTERM` sent to
+`ocura-oss run`, stops the command and records an interrupted attempt; a second
+Ctrl+C exits immediately and leaves the attempt for `ocura-oss recover` to close.
 
 ## When to use something else
 

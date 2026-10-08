@@ -21,6 +21,18 @@ This file records user-visible changes to Ocura OSS.
 - A command run where there is no state now names `ocura-oss init` in its error.
   When a directory above the root holds state, the error names that directory
   instead. State is never created implicitly.
+- `ocura-oss run` now handles `SIGTERM`, `SIGHUP`, and Ctrl+Break on Windows as it
+  handles the first Ctrl+C: the command is stopped and the run is recorded as
+  `interrupted` with exit status 1. Before this release those requests ended the
+  recorder, left an abandoned attempt, and left the command running. A signal the
+  caller ignores, as under `nohup`, stays ignored. The Python `run()` function
+  installs no signal handlers.
+- **Changed:** a command no longer outlives a killed recorder on Windows or Linux.
+  On Windows the operating system ends the command and the processes it started,
+  and an interrupted run now ends those processes too. On Linux the kernel kills
+  the command itself. On macOS the command still keeps running. A command that
+  finishes on its own is not affected. See "When the recorder stops" in
+  `docs/state-and-verification.md`.
 - Documentation: the README and overview show what `compare` prints, say when a
   different tool is the better choice, and state how to remove the package's data.
 - The record format is unchanged. This release reads and extends state written by

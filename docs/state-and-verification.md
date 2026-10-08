@@ -116,9 +116,25 @@ An `abandoned` atom states what is known and nothing else. It keeps the start ti
 
 Running attempts are never touched by recovery. Recovery needs each abandoned attempt's lock to itself, and waits about a quarter of a second for a reader that is checking the same attempt. If a reader holds on longer than that, recovery leaves that attempt for the next call; verification keeps reporting it as abandoned in the meantime.
 
+### When the recorder stops
+
+`ocura-oss run` treats a request to stop it as it treats the first Ctrl+C: it stops the command, records the run as `interrupted`, and exits with status 1. The requests are `SIGTERM` and `SIGHUP` on Linux and macOS, and Ctrl+Break on Windows. A signal the caller already ignores stays ignored, so a run started under `nohup` survives its terminal. On Windows, stopping the command also ends the processes it started; on Linux and macOS only the command itself is signaled.
+
+The Python `run()` function installs no signal handlers. It records an interruption when `KeyboardInterrupt` is raised in the calling thread, so a program that wants the same behavior can set `signal.default_int_handler` for those signals.
+
+A recorder that is killed outright records nothing, and its attempt becomes `abandoned`. What happens to the command depends on the operating system:
+
+| System | The command when its recorder is killed |
+| --- | --- |
+| Windows | The operating system ends it, together with the processes it started |
+| Linux | The kernel kills it; processes it started keep running |
+| macOS | It keeps running |
+
+On Linux this applies when the recording process has a single thread as it launches the command, which is always true of `ocura-oss run`. A command that finishes on its own is not affected on any system: processes it left running stay running.
+
 Limits:
 
-- Ocura OSS does not stop a command when its recorder stops. A command that outlives its recorder keeps running and can keep writing to its logs. Recover only after that command has stopped; otherwise later verification reports its log as changed.
+- Where a command or a process it started outlives a killed recorder, it can keep writing to its logs. Recover only after it has stopped; otherwise later verification reports its log as changed.
 - The locks are advisory operating-system file locks. They are reliable on local filesystems. On a network filesystem, a running attempt may be reported as abandoned or the reverse.
 
 ## Concurrent use
