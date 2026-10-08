@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 
 """Argparse wiring, exit-code mapping, concise text views, and JSON summaries."""
 

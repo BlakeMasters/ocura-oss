@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 
 """A ledger written by 0.5.0 must stay readable for as long as schema 2 is kept.
 

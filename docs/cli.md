@@ -1,6 +1,6 @@
 # Command-line reference
 
-Version 0.5.0.
+Version 0.6.0.
 
 The `ocura-oss` command records trusted local command attempts, creates metadata branches, compares branch evidence, and verifies project-local state.
 
