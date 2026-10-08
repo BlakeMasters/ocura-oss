@@ -21,6 +21,8 @@ This file records user-visible changes to Ocura OSS.
 - A command run where there is no state now names `ocura-oss init` in its error.
   When a directory above the root holds state, the error names that directory
   instead. State is never created implicitly.
+- Documentation: the README and overview show what `compare` prints, say when a
+  different tool is the better choice, and state how to remove the package's data.
 - The record format is unchanged. This release reads and extends state written by
   0.5.0.
 

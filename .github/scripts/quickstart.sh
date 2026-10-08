@@ -17,7 +17,7 @@ ocura-oss run --json --param batch=4 --substitute -- python -c "import sys; prin
 test "$(tr -d '\r\n' < "$(field substituted.json stdout_log)")" = "4"
 ocura-oss verify --json > verify.json
 test "$(field verify.json status)" = "ok"
-ocura-oss compare --json --from "$chokepoint" > compare.json
+ocura-oss compare --json > compare.json
 test "$(field compare.json state)" = "ready"
 # The child run declared nothing: its count=2 label comes from the branch.
 python -c "import json; delta = json.load(open('compare.json'))['children'][0]['run_parameters']; assert delta['changed'] == {'count': {'source': '1', 'child': '2'}}, delta"

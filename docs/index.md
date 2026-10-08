@@ -14,16 +14,22 @@ provides JSON output throughout the workflow; the Python API returns typed resul
 
 ## Why use it
 
-Ocura OSS aims to be the easiest way to start recording runs in a new project,
-especially for local development:
+Ocura OSS is built to just work. It aims to be the easiest way to start recording
+runs in a new project, especially for local development:
 
-- **No dependencies.** The package uses only the Python standard library. There is
-  no server, database, account, or configuration file.
-- **Almost no setup.** `ocura-oss init` is the only setup step. Everything is kept
-  as JSON records and logs in one `.ocura-oss/` directory inside your project.
-- **Easy to hand to an agent.** Every command accepts `--json` and returns a
-  documented exit code, so an AI agent with a shell can set it up and run the
-  whole workflow.
+- **Dependency free.** It needs Python 3.11 or later and nothing else. Installing
+  it adds no other packages, so it cannot conflict with what your project uses.
+- **Easy setup.** `pip install ocura-oss`, then `ocura-oss init`. There is no
+  server, database, account, or configuration file. Every command accepts `--json`
+  and returns a documented exit code, so an AI agent with a shell can do the setup
+  and run the whole workflow.
+- **Easy to modify.** The whole package is eleven modules, about 4,000 lines of
+  typed Python, and its records are plain JSON files. You or an agent can read all
+  of it and change it to fit your workflow, and the Apache-2.0 license does not
+  require you to publish your changes.
+
+It is just as easy to remove: everything it writes is inside `.ocura-oss/` in your
+project, so deleting that directory removes all of it.
 
 ## New in 0.6.0
 
@@ -92,14 +98,33 @@ ocura-oss run --json --param count=1 -- python -c "print(1)"
 ocura-oss branch --json --from <chokepoint-id> --reason "try count 2" --param count=2
 ocura-oss run --json --pathway <child-pathway-id> -- python -c "print(2)"
 ocura-oss verify --json
-ocura-oss compare --json --from <chokepoint-id>
+ocura-oss compare --json
 ```
 
 Use the baseline's `chokepoint_id` to branch and the branch result's `id` for the
 child run. When typing an ID by hand, its first four or more hexadecimal characters
-are enough if they match one record. `compare` reports each variant's relationship
-to its source, parameter changes, outcomes, and timing. Read the recorded output
-logs for workload-specific metrics, such as validation loss or accuracy.
+are enough if they match one record.
+
+Without `--json`, `compare` prints:
+
+```text
+comparison: ready
+source chokepoint: chokepoint-eb61ef56491042ae94e61d1387f3f0d5
+source pathway: pathway-1378d1d28cb54987b9e80d59d61aec74
+source run: passed 0.056063s
+child pathway: pathway-ce4c71137dd449398fe2b4e0198c83c3
+  reason: try count 2
+  parameters: added count=2
+  source run: passed 0.056063s
+  child run: passed 0.061312s
+  run parameters: changed count (1 -> 2)
+```
+
+`compare` reports each variant's relationship to its source, parameter changes,
+outcomes, and timing. `parameters` is how the branch differs from the pathway it
+came from; `run parameters` is how the labels the two runs recorded differ. With no
+`--from`, it compares the newest baseline that has a branch. Read the recorded
+output logs for workload-specific metrics, such as validation loss or accuracy.
 
 **Parameters are recorded labels.** Set actual inputs in your command as well:
 `--param batch=4 -- python train.py --batch 4`. A run on a branch records the
@@ -111,6 +136,23 @@ Omit `--json` for terminal output. By default, `run` streams the command's outpu
 while retaining stdout and stderr logs; `--json` or `--quiet` keeps that output in
 the logs without streaming. A first Ctrl+C records an interrupted attempt; a
 second exits immediately and leaves the attempt for `ocura-oss recover` to close.
+
+## When to use something else
+
+Ocura OSS records what ran, how runs relate, and whether those records are still
+intact. It stops there on purpose:
+
+- **You want dashboards, metric charts, or a tracking server shared by a team.**
+  Use an experiment tracker such as [MLflow](https://mlflow.org/). Ocura OSS has no
+  server and no user interface, and it keeps your output as logs without reading
+  metrics from it.
+- **You need to version datasets or model files, or rebuild a pipeline.** Use a
+  tool such as [DVC](https://dvc.org/). A branch here is lineage metadata; it does
+  not snapshot files.
+- **You run one command and keep its output.** A log file is enough.
+
+Ocura OSS sits between these: more structure than loose log files, and far less to
+adopt than a tracking platform.
 
 ## Autoregressive example: PyTorch, JAX, and Ray
 
@@ -141,7 +183,7 @@ from ocura_oss import branch, compare, initialize, run, verify
 root = initialize("experiment", name="example").root
 baseline = run([sys.executable, "-c", "print(1)"], root=root, parameters={"count": "1"})
 child = branch(baseline.chokepoint.id, root=root, reason="try count 2", parameters={"count": "2"})
-run([sys.executable, "-c", "print(2)"], root=root, pathway_id=child.id, parameters={"count": "2"})
+run([sys.executable, "-c", "print(2)"], root=root, pathway_id=child.id)
 assert verify(root).ok
 comparison = compare(baseline.chokepoint.id, root=root)
 ```
@@ -161,9 +203,9 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [Python API](python-api.md): functions, typed results, and `Store`
 - [State and verification](state-and-verification.md): records and checks
 - [Autoregressive example](../examples/autoregressive/README.md): PyTorch, JAX, and Ray
-- [Hosted documentation](https://ocuna-ai.com/docs): the currently published release
 
 Repository references describe this checkout and remain readable directly on GitHub.
+The documentation for the published release is also [available online](https://ocuna-ai.com/docs).
 
 ## Local state and operating model
 
