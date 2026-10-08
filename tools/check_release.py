@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import email
+import email.message
 import re
 import sys
 import tarfile
@@ -120,15 +121,32 @@ def check_distributions(dist: Path, version: str) -> list[str]:
     unexpected = [name for name in members if not name.startswith(("ocura_oss/", info))]
     if unexpected:
         problems.append(f"wheel contains unexpected files: {', '.join(unexpected)}")
-    if metadata["Version"] != version:
-        problems.append(f"wheel metadata states version {metadata['Version']}, expected {version}")
-    if metadata.get_all("Requires-Dist"):
-        problems.append("wheel metadata declares runtime dependencies")
+    problems += _metadata_problems("wheel", metadata, version)
 
+    # The archive's name is not evidence of what it installs: pip reads PKG-INFO.
+    package_info = f"ocura_oss-{version}/PKG-INFO"
     with tarfile.open(sdist) as source:
         names = source.getnames()
+        member = source.extractfile(package_info) if package_info in names else None
+        source_metadata = None if member is None else email.message_from_bytes(member.read())
+    if source_metadata is None:
+        problems.append(f"source distribution has no {package_info}")
+    else:
+        problems += _metadata_problems("source distribution", source_metadata, version)
     if any(name.startswith(f"ocura_oss-{version}/examples/") for name in names):
         problems.append("source distribution includes repository-only examples")
+    return problems
+
+
+def _metadata_problems(label: str, metadata: email.message.Message, version: str) -> list[str]:
+    """Check one distribution's core metadata for the version and for dependencies."""
+    problems: list[str] = []
+    if metadata["Version"] != version:
+        problems.append(
+            f"{label} metadata states version {metadata['Version']}, expected {version}"
+        )
+    if metadata.get_all("Requires-Dist"):
+        problems.append(f"{label} metadata declares runtime dependencies")
     return problems
 
 

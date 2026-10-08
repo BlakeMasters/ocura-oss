@@ -45,7 +45,7 @@ The checksum covers the schema version, kind, and canonical payload. It provides
 
 ## Format compatibility
 
-Records carry schema version 2. This release reads schema 2 only. State written by Ocura OSS 0.4 and earlier carries schema 1 and is rejected with an error that names the version; there is no migration, so start a new state directory. Legacy `.ocura/` state is not compatible either.
+Records carry schema version 2. This release reads schema 2 only. State written by Ocura OSS 0.4 and earlier carries schema 1 and is rejected; see [upgrading from 0.4](#upgrading-from-04). Legacy `.ocura/` state is not compatible either.
 
 Within one schema version, a record changes only by gaining optional fields:
 
@@ -56,6 +56,26 @@ Within one schema version, a record changes only by gaining optional fields:
 The repository keeps a small ledger written by 0.5.0 as a test fixture. Every later release that keeps schema 2 must verify it unchanged.
 
 This describes how the format changes. It is not a commitment that schema 2 is final: the 0.x status in the [overview](index.md#project-status) still applies.
+
+### Upgrading from 0.4
+
+Version 0.5 cannot read a `.ocura-oss/` directory written by 0.4 or earlier, and it does not convert one. Every command pointed at such a directory, including `verify`, stops with exit status 2 and a message naming the cause:
+
+```text
+error: unsupported schema version 1 in den record den.json; Ocura OSS 0.4 and earlier wrote this state, and this version cannot read or convert it. Keep using "ocura-oss<0.5" for it, or move .ocura-oss aside and run `ocura-oss init`
+```
+
+The old directory is never modified. Decide per project before upgrading:
+
+| You want to | Do this |
+| --- | --- |
+| Keep working with the existing records | Stay on 0.4 for that project: `python -m pip install "ocura-oss<0.5"` in its environment. 0.4 reads and extends the directory as before |
+| Start recording with 0.5 in the same project | Move the old directory aside, then run `ocura-oss init`. For example `mv .ocura-oss .ocura-oss-0.4`, or in PowerShell `Rename-Item .ocura-oss .ocura-oss-0.4` |
+| Look at old records after upgrading | The logs under the moved directory's `logs/` are plain files, and the records are plain JSON. To use 0.4's commands on them again, move the directory back to `.ocura-oss` in an environment that has 0.4 |
+
+A new state directory starts empty. Identifiers from the old one are unknown to it, so a branch cannot name an old chokepoint as its source: record the baseline again under 0.5 before branching from it.
+
+If you need comparisons or listings from the old records later, save them with 0.4 first, for example `ocura-oss compare --json --from ID` and `ocura-oss chokepoints --json`.
 
 ## Record relationships
 
@@ -77,7 +97,7 @@ A run is journaled before its command launches, so an attempt stays visible even
 2. The command runs.
 3. `run` writes the atom, then the chokepoint, then removes the attempt record and releases the lock.
 
-The operating system releases the lock when the recording process exits for any reason, including a forced kill. An attempt record is therefore in one of two states:
+The operating system releases the lock when the recording process exits for any reason, including a forced kill. The recorder holds the lock exclusively; anything that only asks whether a recorder is alive takes it shared, so concurrent verifiers and listings never mistake one another for a recorder. An attempt record is therefore in one of two states:
 
 | State | Meaning |
 | --- | --- |
@@ -94,7 +114,7 @@ The operating system releases the lock when the recording process exits for any 
 
 An `abandoned` atom states what is known and nothing else. It keeps the start time, recorded command, and declared parameters, and has no finish time, duration, return code, or launch category. Whatever output had been captured is retained: recovery measures each log as it finds it and records that size and digest, so the logs verify from then on. An abandoned atom's chokepoint is branchable, like any other.
 
-Running attempts are never touched by recovery.
+Running attempts are never touched by recovery. Recovery needs each abandoned attempt's lock to itself, and waits about a quarter of a second for a reader that is checking the same attempt. If a reader holds on longer than that, recovery leaves that attempt for the next call; verification keeps reporting it as abandoned in the meantime.
 
 Limits:
 

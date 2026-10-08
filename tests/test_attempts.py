@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -38,6 +39,28 @@ def wait_until(condition, message):
             return value
         time.sleep(0.02)
     raise AssertionError(f"timed out waiting until {message}")
+
+
+@contextlib.contextmanager
+def reader_probe(path):
+    """Hold the shared lock that a reader's liveness check takes for an instant."""
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        if not locking._try_lock(descriptor, shared=True):
+            raise AssertionError("a recorder holds the lock")
+        yield
+        locking._unlock(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def release_later(path, seconds):
+    """Hold a reader's probe on *path* and let go of it shortly, as a real reader does."""
+    probe = reader_probe(path)
+    probe.__enter__()
+    timer = threading.Timer(seconds, probe.__exit__, (None, None, None))
+    timer.start()
+    return timer
 
 
 def stop(process):
@@ -80,6 +103,38 @@ class LockTests(unittest.TestCase):
             self.assertTrue(held)
             self.assertTrue(locking.is_held(self.path))
         self.assertFalse(self.path.exists())
+
+    def test_one_readers_probe_does_not_look_like_a_recorder_to_another(self):
+        self.path.touch()
+        with reader_probe(self.path):
+            self.assertFalse(locking.is_held(self.path))
+            with reader_probe(self.path):
+                self.assertFalse(locking.is_held(self.path))
+        self.assertTrue(self.path.exists(), "probing must not remove the lock file")
+
+    def test_recorder_is_seen_by_every_reader(self):
+        with locking.hold(self.path):
+            with self.assertRaises(AssertionError), reader_probe(self.path):
+                pass
+            self.assertTrue(locking.is_held(self.path))
+            self.assertTrue(locking.is_held(self.path))
+
+    def test_try_hold_waits_out_a_passing_reader(self):
+        self.path.touch()
+        timer = release_later(self.path, 0.05)
+        try:
+            with locking.try_hold(self.path) as held:
+                self.assertTrue(held)
+        finally:
+            timer.join()
+        self.assertFalse(self.path.exists())
+
+    def test_try_hold_gives_up_while_the_lock_stays_shared(self):
+        self.path.touch()
+        with reader_probe(self.path), locking.try_hold(self.path) as held:
+            self.assertFalse(held)
+        self.assertTrue(self.path.exists())
+        self.assertFalse(locking.is_held(self.path))
 
     def test_operating_system_releases_the_lock_when_the_holder_is_killed(self):
         holder = subprocess.Popen(
@@ -211,6 +266,60 @@ class AbandonedAttemptTests(JournalTestCase):
         with self.assertRaises(StoreError) as ctx:
             ocura_oss.compare(root=self.store.root)
         self.assertIn("ocura-oss recover", str(ctx.exception))
+
+    def killed_recorder_lock(self, attempt):
+        """Leave the lock file a killed recorder cannot remove."""
+        lock = self.store.attempts_dir / f"{attempt.id}.lock"
+        lock.touch()
+        return lock
+
+    def test_another_readers_probe_cannot_hide_an_abandoned_attempt(self):
+        attempt = self.abandon()
+        with reader_probe(self.killed_recorder_lock(attempt)):
+            ((_attempt, state),) = self.store.list_attempts()
+            self.assertIs(state, model.AttemptState.ABANDONED)
+            report = self.store.verify_state()
+            self.assertFalse(report.ok)
+            self.assertEqual(report.abandoned_attempts, (attempt.id,))
+            self.assertEqual(report.running_attempts, ())
+
+    def test_concurrent_verifiers_always_report_an_abandoned_attempt(self):
+        attempt = self.abandon()
+        self.killed_recorder_lock(attempt)
+        seen = []
+
+        def verify_repeatedly():
+            for _ in range(100):
+                report = self.store.verify_state()
+                seen.append((report.ok, report.abandoned_attempts, report.running_attempts))
+
+        verifiers = [threading.Thread(target=verify_repeatedly) for _ in range(4)]
+        for verifier in verifiers:
+            verifier.start()
+        for verifier in verifiers:
+            verifier.join()
+        self.assertEqual(len(seen), 400)
+        self.assertEqual(set(seen), {(False, (attempt.id,), ())})
+
+    def test_recovery_waits_out_a_passing_reader(self):
+        attempt = self.abandon()
+        timer = release_later(self.killed_recorder_lock(attempt), 0.05)
+        try:
+            (recovered,) = self.store.recover()
+        finally:
+            timer.join()
+        self.assertEqual(recovered.atom_id, attempt.id)
+        self.assertIs(recovered.action, model.RecoveryAction.ABANDONED)
+        self.assertEqual(self.attempt_files(), [])
+        self.assertTrue(self.store.verify_state().ok)
+
+    def test_lingering_reader_delays_recovery_without_hiding_the_attempt(self):
+        attempt = self.abandon()
+        with reader_probe(self.killed_recorder_lock(attempt)):
+            self.assertEqual(self.store.recover(), ())
+            self.assertEqual(self.store.verify_state().abandoned_attempts, (attempt.id,))
+        (recovered,) = self.store.recover()
+        self.assertEqual(recovered.atom_id, attempt.id)
 
     def test_recovery_records_an_abandoned_atom_without_inventing_an_outcome(self):
         attempt = self.abandon(output=b"partial output\n")

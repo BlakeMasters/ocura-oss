@@ -142,7 +142,27 @@ class ReadValidationTests(unittest.TestCase):
             self._rewrite(den_path, 1, "den", envelope["payload"])
             with self.assertRaises(StoreError) as ctx:
                 store.load_den()
-            self.assertIn("Ocura OSS 0.4 and earlier wrote it", str(ctx.exception))
+            message = str(ctx.exception)
+            self.assertIn("Ocura OSS 0.4 and earlier wrote this state", message)
+            self.assertIn('Keep using "ocura-oss<0.5" for it', message)
+            self.assertIn("move .ocura-oss aside and run `ocura-oss init`", message)
+
+    def test_every_entry_point_rejects_state_from_an_earlier_schema(self):
+        with temp_root() as root:
+            store = new_store(root)
+            den_path = store.state_dir / "den.json"
+            envelope = json.loads(den_path.read_text("utf-8"))
+            self._rewrite(den_path, 1, "den", envelope["payload"])
+            for operation in (
+                store.load_den,
+                store.verify_state,
+                store.list_attempts,
+                store.recover,
+                lambda: store.load_pathway(envelope["payload"]["default_pathway_id"]),
+            ):
+                with self.subTest(operation=operation), self.assertRaises(StoreError) as ctx:
+                    operation()
+                self.assertIn("unsupported schema version 1", str(ctx.exception))
 
     def test_missing_required_field_is_rejected(self):
         with temp_root() as root:
