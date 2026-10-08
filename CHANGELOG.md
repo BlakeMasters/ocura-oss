@@ -2,7 +2,7 @@
 
 This file records user-visible changes to Ocura OSS.
 
-## 0.5.0 - Unreleased
+## 0.5.0 - 2026-10-07
 
 - **Breaking:** change the record format to schema version 2. State written by 0.4 and
   earlier is rejected with exit status 2 and left untouched; there is no migration. To
