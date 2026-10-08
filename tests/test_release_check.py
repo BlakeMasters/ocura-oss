@@ -55,21 +55,37 @@ def write_checkout(
     (root / "examples" / "sample" / "README.md").write_text("# Sample\n", encoding="utf-8")
 
 
-def write_distributions(dist, *, metadata_extra="", wheel_extra=(), sdist_extra=()):
+def core_metadata(version, extra=""):
+    return f"Metadata-Version: 2.4\nName: ocura-oss\nVersion: {version}\n{extra}\nText\n"
+
+
+MATCHING_METADATA = core_metadata("1.2.3")
+
+
+def write_distributions(
+    dist,
+    *,
+    metadata_extra="",
+    wheel_extra=(),
+    sdist_extra=(),
+    sdist_metadata=MATCHING_METADATA,
+):
     version = "1.2.3"
     dist.mkdir()
     info = f"ocura_oss-{version}.dist-info"
     with zipfile.ZipFile(dist / f"ocura_oss-{version}-py3-none-any.whl", "w") as archive:
         archive.writestr("ocura_oss/__init__.py", "")
-        archive.writestr(
-            f"{info}/METADATA",
-            f"Metadata-Version: 2.4\nName: ocura-oss\nVersion: {version}\n{metadata_extra}\nText\n",
-        )
+        archive.writestr(f"{info}/METADATA", core_metadata(version, metadata_extra))
         for name in wheel_extra:
             archive.writestr(name, "")
+    members = {name: b"" for name in sdist_extra}
+    if sdist_metadata is not None:
+        members[f"ocura_oss-{version}/PKG-INFO"] = sdist_metadata.encode("utf-8")
     with tarfile.open(dist / f"ocura_oss-{version}.tar.gz", "w:gz") as archive:
-        for name in (f"ocura_oss-{version}/PKG-INFO", *sdist_extra):
-            archive.addfile(tarfile.TarInfo(name), io.BytesIO(b""))
+        for name, body in members.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(body)
+            archive.addfile(member, io.BytesIO(body))
 
 
 class SourceParityTests(unittest.TestCase):
@@ -172,6 +188,25 @@ class DistributionTests(unittest.TestCase):
         write_distributions(self.dist, wheel_extra=("examples/train.py",))
         problems = check_release.check_distributions(self.dist, "1.2.3")
         self.assertEqual(problems, ["wheel contains unexpected files: examples/train.py"])
+
+    def test_source_distribution_metadata_version_is_checked(self):
+        write_distributions(self.dist, sdist_metadata=core_metadata("1.2.2"))
+        problems = check_release.check_distributions(self.dist, "1.2.3")
+        self.assertEqual(
+            problems, ["source distribution metadata states version 1.2.2, expected 1.2.3"]
+        )
+
+    def test_source_distribution_runtime_dependency_is_reported(self):
+        write_distributions(
+            self.dist, sdist_metadata=core_metadata("1.2.3", "Requires-Dist: requests\n")
+        )
+        problems = check_release.check_distributions(self.dist, "1.2.3")
+        self.assertEqual(problems, ["source distribution metadata declares runtime dependencies"])
+
+    def test_source_distribution_without_metadata_is_reported(self):
+        write_distributions(self.dist, sdist_metadata=None, sdist_extra=("ocura_oss-1.2.3/x",))
+        problems = check_release.check_distributions(self.dist, "1.2.3")
+        self.assertEqual(problems, ["source distribution has no ocura_oss-1.2.3/PKG-INFO"])
 
     def test_examples_in_the_source_distribution_are_reported(self):
         write_distributions(self.dist, sdist_extra=("ocura_oss-1.2.3/examples/train.py",))
