@@ -63,9 +63,10 @@ def run(
     *command* whose values are replaced by a placeholder in every record. The
     command still receives the real values.
 
-    With ``substitute=True``, ``{KEY}`` in a command token is replaced by that
-    parameter's value, from *parameters* first and then the pathway, and each
-    parameter used is recorded as a label. ``context=True`` records the
+    The run records its pathway's effective parameters together with
+    *parameters*, which wins for a key both name. With ``substitute=True``,
+    ``{KEY}`` in a command token is replaced by the value recorded for that
+    key. ``context=True`` records the
     platform and git state at launch; *context_files* names files whose size
     and digest are recorded. Neither is captured unless requested.
     """

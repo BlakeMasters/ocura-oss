@@ -107,7 +107,9 @@ def _build_parser() -> argparse.ArgumentParser:
             " directory, and captured stdout/stderr logs. Everything after -- is"
             " the command; put run's own options before it.\n"
             "Example: ocura-oss run --pathway ID --param batch=2 -- python script.py --batch 2\n"
-            "Parameters are recorded labels; pass actual inputs to COMMAND.\n"
+            "Parameters are recorded labels; pass actual inputs to COMMAND. A run"
+            " also records its pathway's parameters, so a run on a branch does"
+            " not repeat them.\n"
             "While the command runs, its output streams to your terminal and is"
             " recorded under .ocura-oss/logs/. If you press Ctrl+C, the partial"
             " attempt is still recorded as interrupted evidence; a second"
@@ -133,14 +135,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "--pathway",
         default=None,
         metavar="ID",
-        help="pathway to attach evidence to (default: the den's default pathway)",
+        help=(
+            "pathway to attach evidence to, as a full id or a unique prefix"
+            " (default: the den's default pathway)"
+        ),
     )
     run_parser.add_argument(
         "--param",
         action="append",
         default=[],
         metavar="KEY=VALUE",
-        help="record a parameter label (not passed to COMMAND); repeatable",
+        help=(
+            "record a parameter label (not passed to COMMAND); replaces the"
+            " pathway's value for the same key; repeatable"
+        ),
     )
     run_parser.add_argument(
         "--quiet",
@@ -239,7 +247,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "Records a child pathway whose effective parameters are the parent's"
             " plus your overrides. Metadata only: no workspace, artifact, or"
             " process is copied or rewound. Returns exit code 2 for missing,"
-            " checksum-mismatched, nonterminal, nonbranchable, or unverifiable sources."
+            " checksum-mismatched, nonterminal, nonbranchable, or unverifiable sources.\n"
+            "An id may be shortened to a unique prefix of at least 4 hexadecimal"
+            " characters, such as chokepoint-447c or 447c."
         ),
     )
     branch_parser.add_argument(
@@ -247,7 +257,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="source",
         required=True,
         metavar="CHOKEPOINT_ID",
-        help="source chokepoint id (see chokepoints)",
+        help="source chokepoint, as a full id or a unique prefix (see chokepoints)",
     )
     branch_parser.add_argument(
         "--reason", required=True, metavar="TEXT", help="why this branch exists (nonblank)"
@@ -293,8 +303,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="CHOKEPOINT_ID",
         help=(
-            "source chokepoint id (default: newest source with child pathways,"
-            " or newest terminal chokepoint when no branches exist)"
+            "source chokepoint, as a full id or a unique prefix (default: newest"
+            " source with child pathways, or newest terminal chokepoint when no"
+            " branches exist)"
         ),
     )
     compare_parser.add_argument(
@@ -498,7 +509,10 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
         raise model.ValidationError("unexpected tokens before --; put the command after --")
     state = _open_store(args.root)
     declared = _collect_parameters(args.param)
-    pathway_id = args.pathway or state.load_den().default_pathway_id
+    if args.pathway:
+        pathway_id = state.resolve_id(args.pathway, "pathway")
+    else:
+        pathway_id = state.load_den().default_pathway_id
     state.load_pathway(pathway_id)
     mirror = not (args.quiet or args.json)
     if not args.json:
@@ -630,7 +644,9 @@ def _chokepoints(args: argparse.Namespace) -> int:
 def _branch(args: argparse.Namespace) -> int:
     overrides = _collect_parameters(args.param)
     state = _open_store(args.root)
-    chokepoint, _atom, pathway = branching.load_verified_source(state, args.source)
+    chokepoint, _atom, pathway = branching.load_verified_source(
+        state, state.resolve_id(args.source, "chokepoint")
+    )
     child = branching.create_child_pathway(
         state,
         source_chokepoint=chokepoint,
@@ -658,7 +674,8 @@ def _branch(args: argparse.Namespace) -> int:
 
 def _compare(args: argparse.Namespace) -> int:
     state = _open_store(args.root)
-    result = branching.compare(state, args.source)
+    source = None if args.source is None else state.resolve_id(args.source, "chokepoint")
+    result = branching.compare(state, source)
     if args.json:
         _emit_json(result.to_dict())
         return EXIT_OK

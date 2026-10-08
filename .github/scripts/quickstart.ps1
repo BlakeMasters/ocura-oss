@@ -22,7 +22,7 @@ $chokepoint = (Read-Json baseline.json).chokepoint_id
 ocura-oss branch --json --from $chokepoint --reason "try count 2" --param count=2 > branch.json
 Assert-Step "branch"
 $pathway = (Read-Json branch.json).id
-ocura-oss run --json --pathway $pathway --param count=2 -- python -c "print(2)" > child.json
+ocura-oss run --json --pathway $pathway -- python -c "print(2)" > child.json
 Assert-Step "child run"
 ocura-oss run --json --param batch=4 --substitute -- python -c "import sys; print(sys.argv[1])" "{batch}" > substituted.json
 Assert-Step "substituted run"
@@ -34,6 +34,9 @@ if ((Read-Json verify.json).status -ne "ok") { throw "verify did not report ok" 
 ocura-oss compare --json --from $chokepoint > compare.json
 Assert-Step "compare"
 if ((Read-Json compare.json).state -ne "ready") { throw "compare is not ready" }
+# The child run declared nothing: its count=2 label comes from the branch.
+$changed = (Read-Json compare.json).children[0].run_parameters.changed.PSObject.Properties['count'].Value
+if ($changed.source -ne "1" -or $changed.child -ne "2") { throw "the child run did not record the branch's count" }
 # A redirected manifest is UTF-16 in Windows PowerShell 5.1; verify must accept it.
 ocura-oss manifest > retained.manifest
 Assert-Step "manifest"

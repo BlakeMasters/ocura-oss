@@ -34,11 +34,21 @@ Run `ocura-oss COMMAND --help` for command-specific help.
 
 `--root PATH` identifies the directory that contains `.ocura-oss/`. Relative paths and `~` are resolved before use. The command does not change the parent process working directory.
 
-`init` and `demo` create state. All other commands require initialized state.
+`init` and `demo` create state. All other commands require initialized state. Without it they exit with status 2 and name `ocura-oss init`. When a directory above the root already holds state, the message names that directory, so that a command run from a subdirectory is not answered by creating a second ledger.
+
+### Identifiers
+
+Every record has an identifier made of its kind and 32 hexadecimal characters, such as `chokepoint-447ca3002f0b4d7c9a1e5b6c7d8e9f01`. Output, JSON results, and records always carry the full identifier.
+
+`branch --from`, `compare --from`, and `run --pathway` also accept a prefix: at least four of the identifier's leading hexadecimal characters, with or without the kind word, such as `447c` or `chokepoint-447ca3`. A prefix must match exactly one stored record of that kind. One that matches several is rejected with the matching identifiers listed, and one that matches none is rejected, both with exit status 2 and before anything is written or run.
+
+Prefixes are for typing by hand. A script or agent already holds the full identifier and should pass it, because a prefix that is unique today can match a second record later.
 
 ### Declared parameters
 
 `--param KEY=VALUE` records a string label. The option is repeatable. Keys must begin with a letter or underscore and may then contain letters, digits, underscores, periods, or hyphens. Keys and values must not be empty. A key may appear only once in one invocation.
+
+A run records its pathway's effective parameters together with its own declarations. A run on a branch therefore carries the branch's parameters without repeating them; a `--param` on the run replaces the pathway's value for the same key in that run's record and adds any other key. A pathway's parameters are fixed when it is created.
 
 Declared parameters do not configure the child process. Pass process arguments after `--` in `run`. To declare a value once and also pass it, use `run --substitute` and write `{KEY}` in the command, quoted in PowerShell.
 
@@ -115,8 +125,8 @@ The `--` separator is required. Ocura OSS options belong before it. Every token 
 | Name | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--root PATH` | path | current directory | Project root containing initialized state |
-| `--pathway ID` | pathway ID | den default | Pathway that receives the recorded atom |
-| `--param KEY=VALUE` | string pair | none | Declared run parameter; repeatable |
+| `--pathway ID` | pathway ID or unique prefix | den default | Pathway that receives the recorded atom |
+| `--param KEY=VALUE` | string pair | none | Declared run parameter, recorded with the pathway's parameters and replacing the pathway's value for the same key; repeatable |
 | `--quiet` | flag | false | Retain output without mirroring it to the terminal |
 | `--json` | flag | false | Emit one result as JSON; retain child output in logs without streaming |
 | `--no-capture` | flag | false | Retain no stdout or stderr; the record states that output was not captured |
@@ -136,13 +146,13 @@ With `--no-capture`, no log files are written. Output still streams to the termi
 
 `--mask-arg POSITION` counts `COMMAND` tokens from zero, so position 0 is the executable. The command receives the real token; the attempt and atom records store `<masked>` there and list the position. Masking does not alter output, so a command that prints the value still writes it to a captured log. A position outside `COMMAND` is rejected before anything runs.
 
-With `--substitute`, each `{KEY}` in a `COMMAND` token is replaced by that parameter's value before the command launches. A value comes from this run's `--param` declarations first and then from the pathway's effective parameters, so a run on a branch can use the branch's values without restating them. Every parameter used this way is recorded as a declared parameter of the run, and the recorded command is the substituted one. Write `{{` or `}}` for a literal brace. A placeholder with no value, or an unbalanced brace, is rejected before anything runs. Without `--substitute`, braces are passed through untouched. Quote a placeholder, as in `"{batch}"`, when the shell is PowerShell: it reads bare braces as a script block and does not pass them to the command.
+With `--substitute`, each `{KEY}` in a `COMMAND` token is replaced by that parameter's value before the command launches. A value comes from this run's `--param` declarations first and then from the pathway's effective parameters, so a run on a branch can use the branch's values without restating them. These are the same labels the run records, and the recorded command is the substituted one. Write `{{` or `}}` for a literal brace. A placeholder with no value, or an unbalanced brace, is rejected before anything runs. Without `--substitute`, braces are passed through untouched. Quote a placeholder, as in `"{batch}"`, when the shell is PowerShell: it reads bare braces as a script block and does not pass them to the command.
 
 `--context` and `--context-file` add an optional `context` object to the record; see [optional launch context](state-and-verification.md#optional-launch-context). Neither runs or reads anything unless it is present.
 
 One run produces:
 
-- one atom containing timing, outcome, declared parameters, command arguments, and log metadata
+- one atom containing timing, outcome, the pathway's and the run's declared parameters, command arguments, and log metadata
 - one stdout log and one stderr log, unless `--no-capture` is present
 - one branchable terminal chokepoint
 
@@ -152,7 +162,7 @@ A passing command records `passed`. A nonzero return code records `failed`. A la
 
 #### Text output
 
-The final text summary includes the atom, chokepoint, pathway, outcome, duration, log paths, and the return code or launch category when available. With `--no-capture`, it states `output: not captured` in place of the log paths. It does not repeat command arguments.
+The final text summary includes the atom, chokepoint, pathway, outcome, duration, log paths, and the return code or launch category when available. With `--no-capture`, it states `output: not captured` in place of the log paths. It does not repeat command arguments or parameter values; `pathways` lists a pathway's parameters and `compare` lists what each run recorded.
 
 #### JSON output
 
@@ -187,7 +197,7 @@ ocura-oss run -- python script.py --epochs 4
 ```
 
 ```console
-ocura-oss run --pathway pathway-<id> --param batch=4 --quiet -- python script.py --batch 4
+ocura-oss run --pathway pathway-<id> --quiet -- python script.py --batch 4
 ```
 
 Declare a value once and pass it to the command:
@@ -299,7 +309,7 @@ ocura-oss branch --from CHOKEPOINT_ID --reason TEXT [--param KEY=VALUE] [--root 
 
 | Name | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--from CHOKEPOINT_ID` | chokepoint ID | required | Terminal branchable source chokepoint |
+| `--from CHOKEPOINT_ID` | chokepoint ID or unique prefix | required | Terminal branchable source chokepoint |
 | `--reason TEXT` | string | required | Nonblank explanation recorded on the child pathway |
 | `--param KEY=VALUE` | string pair | none | Override applied to the parent's effective parameters; repeatable |
 | `--root PATH` | path | current directory | Project root containing the source |
@@ -311,7 +321,7 @@ Before writing, `branch` validates the chokepoint, its atom, its pathway, their 
 
 The child inherits the parent's effective parameters and applies the supplied overrides. The operation records the parent pathway, source chokepoint, reason, creation time, and effective parameters.
 
-It does not copy a workspace, process, memory image, checkpoint, artifact, source atom, or external state. It does not run a command. Use `run --pathway CHILD_ID` to attach later evidence.
+It does not copy a workspace, process, memory image, checkpoint, artifact, source atom, or external state. It does not run a command. Use `run --pathway CHILD_ID` to attach later evidence; that run records the child's effective parameters.
 
 #### JSON output
 
@@ -342,7 +352,7 @@ ocura-oss compare [--from CHOKEPOINT_ID] [--root PATH] [--json]
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--from CHOKEPOINT_ID` | chokepoint ID | newest branched source, or newest terminal source when no branches exist | Explicit source for targeted verification |
+| `--from CHOKEPOINT_ID` | chokepoint ID or unique prefix | newest branched source, or newest terminal source when no branches exist | Explicit source for targeted verification |
 | `--root PATH` | path | current directory | Project root containing initialized state |
 | `--json` | flag | false | Emit a structured comparison document |
 
@@ -360,7 +370,7 @@ Without `--from`, the complete state must pass verification before Ocura OSS sel
 | `partial` | At least one child pathway lacks terminal evidence |
 | `no_branch` | No child pathway was created from the source chokepoint |
 
-For a child with multiple atoms, comparison uses the newest atom by start time and identifier. It reports pathway parameter differences and, when child evidence exists, run-level declared parameter differences.
+For a child with multiple atoms, comparison uses the newest atom by start time and identifier. It reports pathway parameter differences and, when child evidence exists, run-level declared parameter differences. The pathway delta compares the two pathways' effective parameters. The run delta compares the labels the source run and the child run recorded, which include each run's own declarations.
 
 Parameter deltas contain inherited, added, and changed values. Removed parameters are outside the comparison schema.
 

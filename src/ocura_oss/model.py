@@ -20,6 +20,7 @@ TERMINAL_KIND = "terminal"
 MASKED_ARGUMENT = "<masked>"
 
 _ID_PATTERN = re.compile(r"^(den|pathway|atom|chokepoint)-([0-9a-f]{32})$")
+ID_PREFIX_MIN = 4
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _PARAMETER_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 _PLACEHOLDER_PATTERN = re.compile(r"\{\{|\}\}|\{([A-Za-z_][A-Za-z0-9_.-]*)\}|[{}]")
@@ -108,6 +109,19 @@ def is_valid_id(value: object, prefix: str) -> bool:
     if not isinstance(value, str):
         return False
     return re.fullmatch(rf"{re.escape(prefix)}-[0-9a-f]{{32}}", value) is not None
+
+
+def id_stem(value: object, prefix: str) -> str | None:
+    """Return ``prefix-HEX`` when *value* abbreviates an id of that kind.
+
+    An abbreviation is at least ``ID_PREFIX_MIN`` of the id's leading
+    hexadecimal characters, with or without the kind word in front.
+    """
+    if not isinstance(value, str):
+        return None
+    pattern = rf"(?:{re.escape(prefix)}-)?([0-9a-f]{{{ID_PREFIX_MIN},32}})"
+    match = re.fullmatch(pattern, value)
+    return None if match is None else f"{prefix}-{match.group(1)}"
 
 
 def canonical_json(schema_version: int, kind: str, payload: Mapping[str, object]) -> bytes:

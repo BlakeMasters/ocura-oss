@@ -72,9 +72,10 @@ def run_command(
     positions whose values are replaced by a placeholder in every record; the
     command itself still receives them.
 
-    When ``substitute`` is true, ``{KEY}`` in a command token is replaced by
-    that parameter's value, taken from the declared parameters and then the
-    pathway's, and every parameter used is recorded as a label of the run.
+    The run records its pathway's effective parameters as its own labels;
+    ``declared_parameters`` adds to them and wins for a key both name. When
+    ``substitute`` is true, ``{KEY}`` in a command token is replaced by that
+    label's value.
     ``context`` records the platform and git state at launch, and
     ``context_files`` records the size and digest of each named file.
 
@@ -90,12 +91,12 @@ def run_command(
     tokens = tuple(argv)
     if not tokens or not all(isinstance(token, str) and token for token in tokens):
         raise StoreError("command must be a nonempty sequence of nonempty strings")
-    parameters = model.validate_parameters(declared_parameters)
+    declared = model.validate_parameters(declared_parameters)
     pathway = store.load_pathway(pathway_id)
+    parameters = {**pathway.parameters, **declared}
     try:
         if substitute:
-            tokens, used = model.substitute_parameters(tokens, {**pathway.parameters, **parameters})
-            parameters = {**parameters, **used}
+            tokens, _used = model.substitute_parameters(tokens, parameters)
         recorded_command, masked = model.mask_command(tokens, masked_arguments)
     except model.ValidationError as exc:
         raise StoreError(str(exc)) from exc

@@ -24,6 +24,7 @@ _ENVELOPE_KEYS = {"schema_version", "kind", "payload", "checksum"}
 _HASH_CHUNK = 1024 * 1024
 _REMOVE_RETRIES = 200
 _REMOVE_DELAY = 0.01
+_SHOWN_MATCHES = 5
 
 _T = TypeVar("_T")
 
@@ -101,8 +102,52 @@ class Store:
 
     def require(self) -> None:
         """Require an initialized den under this project root."""
-        if not self.den_path.is_file():
-            raise StoreError(f"no Ocura OSS state found under {self.root}")
+        if self.den_path.is_file():
+            return
+        missing = f"no Ocura OSS state found under {self.root}"
+        if self.state_dir.exists():
+            raise StoreError(f"{missing}: {STATE_DIR_NAME}/ exists but has no den record")
+        for parent in self.root.parents:
+            # os.path.isfile reports an unreadable ancestor as absent on every Python.
+            if os.path.isfile(parent / STATE_DIR_NAME / "den.json"):
+                raise StoreError(
+                    f"{missing}; there is state under {parent}: use that as the root,"
+                    " or run `ocura-oss init` to create new state here"
+                )
+        raise StoreError(f"{missing}; run `ocura-oss init` there to create it")
+
+    def resolve_id(self, value: str, kind: Literal["pathway", "atom", "chokepoint"]) -> str:
+        """Return the full identifier that *value* names.
+
+        A full identifier is returned as given, whether or not its record
+        exists. Anything shorter must be at least four of an identifier's
+        leading hexadecimal characters, with or without the kind word, and
+        must match exactly one stored record of that kind.
+        """
+        if model.is_valid_id(value, kind):
+            return value
+        stem = model.id_stem(value, kind)
+        if stem is None:
+            raise StoreError(
+                f"malformed {kind} identifier: {value!r}; give the full id or at least"
+                f" {model.ID_PREFIX_MIN} of its leading hexadecimal characters"
+            )
+        matches = sorted(
+            path.stem
+            for path in self._dir_for(f"{kind}s").glob(f"{stem}*.json")
+            if model.is_valid_id(path.stem, kind)
+        )
+        if len(matches) == 1:
+            return matches[0]
+        if not matches:
+            raise StoreError(f"no {kind} identifier starts with {stem}")
+        shown = ", ".join(matches[:_SHOWN_MATCHES])
+        if len(matches) > _SHOWN_MATCHES:
+            shown += f", and {len(matches) - _SHOWN_MATCHES} more"
+        raise StoreError(
+            f"{kind} identifier prefix {stem} is ambiguous; it matches"
+            f" {len(matches)} records: {shown}"
+        )
 
     def load_den(self) -> model.Den:
         """Load and validate the den record."""

@@ -20,6 +20,8 @@ A crafted pathway lineage that exceeds Python's recursion limit can propagate `R
 
 Declared parameter mappings require nonempty string values. Keys must begin with a letter or underscore and may then contain letters, digits, underscores, periods, or hyphens. Values are stored without type conversion.
 
+Identifier parameters take full identifiers. The shortened identifiers that the CLI accepts are expanded by [`Store.resolve_id`](#storeresolve_id).
+
 Use these operations from a script or an AI agent inside its existing execution environment. The [automation guide](automation.md) describes caller responsibilities; the [training example](../examples/autoregressive/README.md) supplies PyTorch/JAX workloads with an optional local Ray executor.
 
 ## Workflow example
@@ -51,7 +53,6 @@ run(
     [sys.executable, "-c", "print('child')"],
     root=root,
     pathway_id=child.id,
-    parameters={"batch": "4"},
 )
 
 comparison = compare(baseline.chokepoint.id, root=root)
@@ -131,11 +132,11 @@ Run one trusted local command and record terminal evidence.
 | `command` | sequence of strings | required | Executable followed by its argument tokens; a plain string or bytes object is rejected |
 | `root` | path-like, string, or None | `None` | Project root containing initialized state |
 | `pathway_id` | string or None | `None` | Pathway that receives the atom; `None` selects the den's default pathway |
-| `parameters` | mapping of string to string, or None | `None` | Declared parameters stored on the atom; they are not passed to the child process |
+| `parameters` | mapping of string to string, or None | `None` | Labels stored on the atom together with the pathway's effective parameters, replacing the pathway's value for the same key; they are not passed to the child process |
 | `mirror` | boolean | `False` | Stream stdout and stderr to the current terminal while retaining the same bytes in logs |
 | `capture` | boolean | `True` | Retain stdout and stderr as logs; `False` writes no output to disk and records that it was not captured |
 | `masked_arguments` | iterable of integers | `()` | Zero-based positions in `command` whose tokens are stored as `<masked>`; the command still receives the real values |
-| `substitute` | boolean | `False` | Replace `{KEY}` in command tokens with that parameter's value, and record each parameter used |
+| `substitute` | boolean | `False` | Replace `{KEY}` in command tokens with the value the run records for that key |
 | `context` | boolean | `False` | Record the platform and the git revision and dirty state at launch |
 | `context_files` | iterable of paths | `()` | Files whose size and SHA-256 are recorded at launch; relative paths are resolved against the project root |
 
@@ -172,7 +173,7 @@ Stdout and stderr are stored separately under `.ocura-oss/logs/`. With `capture=
 
 Each position in `masked_arguments` must index `command`; position 0 is the executable. The attempt and atom records store `<masked>` at those positions and list them. Masking does not alter output, so a command that prints a masked value still writes it to a captured log.
 
-With `substitute=True`, a value comes from `parameters` first and then from the pathway's effective parameters. The returned atom's `command` is the substituted command, and its `declared_parameters` are `parameters` plus every parameter a placeholder used. `{{` and `}}` are literal braces; a placeholder without a value, or an unbalanced brace, raises `StoreError` before anything runs. Braces are untouched when `substitute` is false.
+The returned atom's `declared_parameters` are the pathway's effective parameters with `parameters` laid over them, so a run on a branch carries the branch's labels without repeating them. With `substitute=True`, placeholders take their values from those labels, and the atom's `command` is the substituted command. `{{` and `}}` are literal braces; a placeholder without a value, or an unbalanced brace, raises `StoreError` before anything runs. Braces are untouched when `substitute` is false.
 
 `context` and `context_files` fill the returned atom's `context` with a `RunContext`; it is `None` when neither is used. Nothing is queried, executed, or read for context otherwise. See [optional launch context](state-and-verification.md#optional-launch-context) for what is recorded and what it does not establish.
 
@@ -526,6 +527,38 @@ Require an initialized den under the project root.
 | `StoreError` | `den.json` is not a file |
 
 This method checks `den.json` presence only. `load_den()` parses the den, and `verify_state()` performs complete verification.
+
+When the root has no `.ocura-oss/` directory, the message names `ocura-oss init`. When a directory above the root holds state, the message names the nearest one instead.
+
+### `Store.resolve_id`
+
+```python
+store.resolve_id(
+    value: str,
+    kind: Literal["pathway", "atom", "chokepoint"],
+) -> str
+```
+
+Return the full identifier that a full or shortened identifier names.
+
+#### Parameters
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `value` | string | A full identifier, or at least four of its leading hexadecimal characters with or without the kind word |
+| `kind` | string | Record kind to search: `pathway`, `atom`, or `chokepoint` |
+
+#### Returns
+
+The full identifier. A full identifier is returned as given, without checking that its record exists.
+
+#### Raises
+
+| Exception | Condition |
+| --- | --- |
+| `StoreError` | `value` is neither a full identifier nor a valid prefix, or the prefix matches no stored record or more than one |
+
+A prefix is matched against record file names only; no record is read. The error for an ambiguous prefix lists up to five matching identifiers. The CLI calls this method for `branch --from`, `compare --from`, and `run --pathway`.
 
 ### `Store.load_den`
 
@@ -1010,7 +1043,7 @@ One recorded command attempt and its referenced output logs.
 | `outcome` | `Outcome` | Terminal command outcome |
 | `return_code` | integer or None | Process return code for passed and failed outcomes |
 | `launch_error_category` | string or None | Normalized launch category, or `interrupted` |
-| `declared_parameters` | mapping of string to string | Labels supplied to this run |
+| `declared_parameters` | mapping of string to string | Labels recorded for this run: its pathway's effective parameters with the run's own declarations laid over them |
 | `command` | tuple of strings | Executable and argument tokens retained in the raw record, with `<masked>` at each masked position |
 | `stdout_log` | string or None | Project-relative stdout log path |
 | `stderr_log` | string or None | Project-relative stderr log path |
@@ -1054,7 +1087,7 @@ One run that has started and is not yet finalized, as returned by `Store.list_at
 | `pathway_id` | string | Pathway the run was started on |
 | `chokepoint_id` | string | Identifier reserved for the atom's terminal chokepoint |
 | `started_at` | string | UTC ISO 8601 start timestamp |
-| `declared_parameters` | mapping of string to string | Labels supplied to this run |
+| `declared_parameters` | mapping of string to string | Labels recorded for this run: its pathway's effective parameters with the run's own declarations laid over them |
 | `command` | tuple of strings | Executable and argument tokens, with `<masked>` at each masked position |
 | `stdout_log` | string or None | Project-relative stdout log path; `None` without capture |
 | `stderr_log` | string or None | Project-relative stderr log path; `None` without capture |

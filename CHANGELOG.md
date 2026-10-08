@@ -6,6 +6,21 @@ This file records user-visible changes to Ocura OSS.
 
 - **License:** Ocura OSS is now released under the Apache License 2.0. Versions 0.5.0
   and earlier remain under MPL-2.0. Contributions are accepted under Apache-2.0.
+- `branch --from`, `compare --from`, and `run --pathway` accept a shortened ID: at
+  least four of its leading hexadecimal characters, with or without the kind word.
+  The prefix must match exactly one record; an ambiguous one is rejected with the
+  matches listed. Output and records still carry full IDs. Add `Store.resolve_id()`.
+  The Python workflow functions still take full IDs.
+- **Changed:** a run now records its pathway's effective parameters together with
+  its own, so a run on a branch no longer repeats the branch's `--param` values. A
+  parameter declared on the run replaces the pathway's value for the same key. Before
+  this release a run recorded only what it declared, plus any pathway parameter that
+  `--substitute` used. `compare` therefore reports a child run's inherited labels
+  under `run_parameters` where it previously reported none. Atoms already recorded
+  are not changed.
+- A command run where there is no state now names `ocura-oss init` in its error.
+  When a directory above the root holds state, the error names that directory
+  instead. State is never created implicitly.
 - The record format is unchanged. This release reads and extends state written by
   0.5.0.
 
