@@ -116,6 +116,9 @@ def _build_parser() -> argparse.ArgumentParser:
             " stays in the logs and stdout contains one result object.\n"
             "Use --no-capture when output must not be retained, and --mask-arg"
             " for a command token that must not be recorded.\n"
+            "With --substitute, write {KEY} in COMMAND to pass a parameter's value"
+            " and record it from one declaration: --param batch=4 --substitute --"
+            ' python train.py --batch "{batch}". Quote the placeholder in PowerShell.\n'
             "Exit codes: 0 passed, 1 command failed or was interrupted,"
             " 3 could not launch; every attempt produces a terminal chokepoint."
         ),
@@ -164,6 +167,26 @@ def _build_parser() -> argparse.ArgumentParser:
             "record a placeholder instead of the COMMAND token at this zero-based"
             " position; COMMAND still receives the real value; repeatable"
         ),
+    )
+    run_parser.add_argument(
+        "--substitute",
+        action="store_true",
+        help=(
+            "replace {KEY} in COMMAND tokens with that parameter's value, from --param"
+            " and then the pathway; write {{ or }} for a literal brace"
+        ),
+    )
+    run_parser.add_argument(
+        "--context",
+        action="store_true",
+        help="record the platform and the git revision and dirty state at launch",
+    )
+    run_parser.add_argument(
+        "--context-file",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="record the size and SHA-256 of this file at launch; repeatable",
     )
     run_parser.add_argument(
         "command",
@@ -300,6 +323,37 @@ def _build_parser() -> argparse.ArgumentParser:
     verify_parser.add_argument(
         "--json", action="store_true", help="print a JSON report including the problems list"
     )
+    verify_parser.add_argument(
+        "--against",
+        default=None,
+        metavar="FILE",
+        help=(
+            "manifest retained from an earlier `ocura-oss manifest`; every record it"
+            " lists must still be present and unchanged"
+        ),
+    )
+
+    manifest_parser = subparsers.add_parser(
+        "manifest",
+        help="print one checksum line per verified record",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Verifies the complete state, then prints one `KIND ID CHECKSUM` line"
+            " for every record. Keep the output somewhere this state's writers"
+            " cannot change, and pass it to `verify --against` later to detect"
+            " records that were rewritten together with their checksums. Exits 2"
+            " without printing a manifest when the state does not verify."
+        ),
+    )
+    manifest_parser.add_argument(
+        "--root",
+        default=None,
+        metavar="PATH",
+        help="project root directory (default: current directory)",
+    )
+    manifest_parser.add_argument(
+        "--json", action="store_true", help="print the digest and entries as JSON"
+    )
 
     attempts_parser = subparsers.add_parser(
         "attempts",
@@ -384,6 +438,8 @@ def _dispatch(args: argparse.Namespace, command_tail: list[str]) -> int:
         return _compare(args)
     if name == "verify":
         return _verify(args)
+    if name == "manifest":
+        return _manifest(args)
     if name == "attempts":
         return _attempts(args)
     if name == "recover":
@@ -455,6 +511,9 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
         mirror=mirror,
         capture=not args.no_capture,
         masked_arguments=args.mask_arg,
+        substitute=args.substitute,
+        context=args.context,
+        context_files=args.context_file,
     )
     atom = execution.atom
     if args.json:
@@ -628,7 +687,8 @@ def _run_phrase(summary: model.RunSummary | None) -> str:
 
 def _verify(args: argparse.Namespace) -> int:
     state = _open_store(args.root)
-    report = state.verify_state()
+    retained = None if args.against is None else _read_manifest(args.against)
+    report = state.verify_state(against=retained)
     den = state.load_den()
     status = "ok" if report.ok else "failed"
     if args.json:
@@ -636,6 +696,7 @@ def _verify(args: argparse.Namespace) -> int:
             {
                 "den": den.id,
                 "status": status,
+                "digest": report.digest,
                 "counts": {
                     "pathways": report.pathways,
                     "atoms": report.atoms,
@@ -661,8 +722,34 @@ def _verify(args: argparse.Namespace) -> int:
         print(f"running attempts: {len(report.running_attempts)}")
     for record, problem in report.problems:
         print(f"problem: {record}: {problem}")
+    if report.digest is not None:
+        print(f"digest: {report.digest}")
     print(f"integrity: {status}")
     return EXIT_OK if report.ok else EXIT_INVALID
+
+
+def _read_manifest(location: str) -> list[str]:
+    raw = Path(location).read_bytes()
+    # Windows PowerShell writes redirected output as UTF-16, or as UTF-8 with a mark.
+    encoding = "utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig"
+    try:
+        return raw.decode(encoding).splitlines()
+    except UnicodeDecodeError as exc:
+        raise StoreError(f"manifest {location} is not UTF-8 or UTF-16 text") from exc
+
+
+def _manifest(args: argparse.Namespace) -> int:
+    state = _open_store(args.root)
+    report = state.verify_state()
+    if not report.ok:
+        record, problem = report.problems[0]
+        raise StoreError(f"a manifest requires a fully verified state ({record}: {problem})")
+    if args.json:
+        _emit_json({"digest": report.digest, "entries": list(report.manifest)})
+        return EXIT_OK
+    for entry in report.manifest:
+        print(entry)
+    return EXIT_OK
 
 
 def _attempts(args: argparse.Namespace) -> int:

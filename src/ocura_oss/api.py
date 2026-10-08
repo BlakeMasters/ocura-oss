@@ -48,6 +48,9 @@ def run(
     mirror: bool = False,
     capture: bool = True,
     masked_arguments: Iterable[int] = (),
+    substitute: bool = False,
+    context: bool = False,
+    context_files: Iterable[os.PathLike[str] | str] = (),
 ) -> RunExecution:
     """Run a trusted local command and record terminal evidence.
 
@@ -59,6 +62,12 @@ def run(
     that it has no logs. *masked_arguments* lists zero-based positions in
     *command* whose values are replaced by a placeholder in every record. The
     command still receives the real values.
+
+    With ``substitute=True``, ``{KEY}`` in a command token is replaced by that
+    parameter's value, from *parameters* first and then the pathway, and each
+    parameter used is recorded as a label. ``context=True`` records the
+    platform and git state at launch; *context_files* names files whose size
+    and digest are recorded. Neither is captured unless requested.
     """
     store = _required_store(root)
     selected_pathway = pathway_id or store.load_den().default_pathway_id
@@ -70,6 +79,9 @@ def run(
         mirror=mirror,
         capture=capture,
         masked_arguments=masked_arguments,
+        substitute=substitute,
+        context=context,
+        context_files=context_files,
     )
 
 
@@ -105,9 +117,13 @@ def compare(source_chokepoint_id: str | None = None, *, root: _Root = None) -> C
     return branching.compare(store, source_chokepoint_id)
 
 
-def verify(root: _Root = None) -> StateVerification:
-    """Recheck every state record and every log referenced by a recorded run."""
-    return _required_store(root).verify_state()
+def verify(root: _Root = None, *, against: Iterable[str] | None = None) -> StateVerification:
+    """Recheck every state record and every log referenced by a recorded run.
+
+    Pass *against* a manifest retained from an earlier verification to also
+    require that each of its records is still present and unchanged.
+    """
+    return _required_store(root).verify_state(against=against)
 
 
 def recover(root: _Root = None) -> tuple[RecoveredAttempt, ...]:

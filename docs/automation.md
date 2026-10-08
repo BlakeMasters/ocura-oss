@@ -17,7 +17,9 @@ variations, with reasons, outputs, and verification.
 
 All invocations must use the intended `--root`. The returned IDs connect the steps
 without scraping text. Parameters label the record; set actual command arguments
-separately. Handle nonzero exits: `run` still returns a recorded result for a failed
+separately, or pass `--substitute` and write `{KEY}` in the command so one
+declaration does both. A program that builds the argument list itself needs no
+quoting; a PowerShell command line must quote the placeholder. Handle nonzero exits: `run` still returns a recorded result for a failed
 command, interruption, or launch failure. See [CLI](cli.md).
 
 If a `run` process is killed before it returns a result, its attempt remains
@@ -62,6 +64,8 @@ verify the other stream, or verify the complete ledger. Keep the workflow's full
 An AI agent can follow that instruction inside its existing execution environment.
 The caller supplies command permissions and isolation. Ocura records and checks
 local evidence; its checksums detect inconsistency without authenticating the writer.
+When the caller must be able to tell whether records were rewritten afterward, save
+`manifest` output outside the agent's reach and check it with `verify --against`.
 
 ## Revisiting an experiment
 

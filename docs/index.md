@@ -28,6 +28,12 @@ before you upgrade.
   `verify` and `compare` work while runs are in flight.
 - **Sensitive values can stay out of records.** `run --no-capture` writes no output
   to disk, and `run --mask-arg` stores a placeholder for a chosen command token.
+- **One declaration can label and configure a run.** `run --substitute` fills `{KEY}`
+  in the command from the declared parameters and records what it used.
+- **Launch context is available on request.** `run --context` records the platform and
+  git revision; `--context-file` records a file's digest.
+- **Later rewrites can be detected.** `ocura-oss manifest` prints checksums to keep
+  elsewhere, and `verify --against` checks the state against them.
 - **Verification is stricter.** Every atom must have exactly one chokepoint.
 - **Format changes follow a stated rule.** Readers ignore fields they do not know,
   so later releases can add optional fields without another format break.
@@ -69,6 +75,7 @@ metrics, such as validation loss or accuracy.
 
 **Parameters are recorded labels.** Set actual inputs in your command as well:
 `--param batch=4 -- python train.py --batch 4`. Each run records its own labels.
+To declare a value once, add `--substitute` and write `"{batch}"` in the command.
 
 Omit `--json` for terminal output. By default, `run` streams the command's output
 while retaining stdout and stderr logs; `--json` or `--quiet` keeps that output in

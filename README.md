@@ -53,6 +53,7 @@ metrics, such as validation loss or accuracy.
 
 **Parameters are recorded labels.** Set actual inputs in your command as well:
 `--param batch=4 -- python train.py --batch 4`. Each run records its own labels.
+To declare a value once, add `--substitute` and write `"{batch}"` in the command.
 
 Omit `--json` for terminal output. By default, `run` streams the command's output
 while retaining stdout and stderr logs; `--json` or `--quiet` keeps that output in

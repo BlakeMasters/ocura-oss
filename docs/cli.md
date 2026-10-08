@@ -21,6 +21,7 @@ Commands run against one project root. Unless `--root PATH` is supplied, the roo
 | `branch` | Create a metadata-only child pathway |
 | `compare` | Compare a source run with runs on its child pathways |
 | `verify` | Recheck records, relationships, and referenced logs |
+| `manifest` | Print one checksum line per verified record, to keep elsewhere |
 | `attempts` | List runs that have started and are not yet finalized |
 | `recover` | Close attempts whose recording process stopped |
 | `demo` | Run the complete workflow in a new retained directory |
@@ -39,7 +40,7 @@ Run `ocura-oss COMMAND --help` for command-specific help.
 
 `--param KEY=VALUE` records a string label. The option is repeatable. Keys must begin with a letter or underscore and may then contain letters, digits, underscores, periods, or hyphens. Keys and values must not be empty. A key may appear only once in one invocation.
 
-Declared parameters do not configure the child process. Pass process arguments after `--` in `run`.
+Declared parameters do not configure the child process. Pass process arguments after `--` in `run`. To declare a value once and also pass it, use `run --substitute` and write `{KEY}` in the command, quoted in PowerShell.
 
 ### JSON output
 
@@ -103,7 +104,8 @@ Run one trusted local command and record terminal evidence.
 
 ```text
 ocura-oss run [--root PATH] [--pathway ID] [--param KEY=VALUE] [--quiet] [--json]
-              [--no-capture] [--mask-arg POSITION] -- COMMAND...
+              [--no-capture] [--mask-arg POSITION] [--substitute]
+              [--context] [--context-file PATH] -- COMMAND...
 ```
 
 The `--` separator is required. Ocura OSS options belong before it. Every token after it is passed to the child command as one argument token.
@@ -119,6 +121,9 @@ The `--` separator is required. Ocura OSS options belong before it. Every token 
 | `--json` | flag | false | Emit one result as JSON; retain child output in logs without streaming |
 | `--no-capture` | flag | false | Retain no stdout or stderr; the record states that output was not captured |
 | `--mask-arg POSITION` | integer | none | Record `<masked>` in place of the `COMMAND` token at this zero-based position; repeatable |
+| `--substitute` | flag | false | Replace `{KEY}` in `COMMAND` tokens with that parameter's value |
+| `--context` | flag | false | Record the platform and the git revision and dirty state at launch |
+| `--context-file PATH` | path | none | Record the size and SHA-256 of this file at launch; repeatable |
 | `COMMAND...` | argument tokens | required | Executable and arguments placed after `--` |
 
 #### Execution
@@ -130,6 +135,10 @@ Stdout and stderr are captured as separate files under `.ocura-oss/logs/`. Unles
 With `--no-capture`, no log files are written. Output still streams to the terminal unless `--quiet` or `--json` is present, and is otherwise discarded.
 
 `--mask-arg POSITION` counts `COMMAND` tokens from zero, so position 0 is the executable. The command receives the real token; the attempt and atom records store `<masked>` there and list the position. Masking does not alter output, so a command that prints the value still writes it to a captured log. A position outside `COMMAND` is rejected before anything runs.
+
+With `--substitute`, each `{KEY}` in a `COMMAND` token is replaced by that parameter's value before the command launches. A value comes from this run's `--param` declarations first and then from the pathway's effective parameters, so a run on a branch can use the branch's values without restating them. Every parameter used this way is recorded as a declared parameter of the run, and the recorded command is the substituted one. Write `{{` or `}}` for a literal brace. A placeholder with no value, or an unbalanced brace, is rejected before anything runs. Without `--substitute`, braces are passed through untouched. Quote a placeholder, as in `"{batch}"`, when the shell is PowerShell: it reads bare braces as a script block and does not pass them to the command.
+
+`--context` and `--context-file` add an optional `context` object to the record; see [optional launch context](state-and-verification.md#optional-launch-context). Neither runs or reads anything unless it is present.
 
 One run produces:
 
@@ -179,6 +188,18 @@ ocura-oss run -- python script.py --epochs 4
 
 ```console
 ocura-oss run --pathway pathway-<id> --param batch=4 --quiet -- python script.py --batch 4
+```
+
+Declare a value once and pass it to the command:
+
+```console
+ocura-oss run --param batch=4 --substitute -- python train.py --batch "{batch}"
+```
+
+Record the revision, the platform, and the digest of a lock file with the run:
+
+```console
+ocura-oss run --context --context-file requirements.lock -- python train.py
 ```
 
 Keep a token out of the records and its output off disk. Position 3 is the value after `--token`:
@@ -373,7 +394,7 @@ A run summary contains `id`, `pathway_id`, `outcome`, `started_at`, `duration_se
 Recheck every state record and every log referenced by a recorded run.
 
 ```text
-ocura-oss verify [--root PATH] [--json]
+ocura-oss verify [--root PATH] [--json] [--against FILE]
 ```
 
 #### Options
@@ -382,6 +403,7 @@ ocura-oss verify [--root PATH] [--json]
 | --- | --- | --- | --- |
 | `--root PATH` | path | current directory | Project root containing initialized state |
 | `--json` | flag | false | Emit counts and the complete problem list as JSON |
+| `--against FILE` | path | none | Manifest retained from an earlier `manifest`; every record it lists must still be present and unchanged |
 
 #### Checks
 
@@ -396,6 +418,7 @@ Verification covers:
 - referenced log containment, existence, byte count, and SHA-256 digest
 - unreferenced files and unexpected directories under `.ocura-oss/logs/`
 - unfinished attempts
+- with `--against`, that every retained manifest entry is still present with the same checksum
 
 `logs_checked` counts individual logs that passed verification. A valid atom normally contributes two logs, and none when it was recorded without capture.
 
@@ -407,6 +430,7 @@ Verification may run while other processes record runs under the same root. An a
 | --- | --- | --- |
 | `den` | string | Den identifier |
 | `status` | string | `ok` or `failed` |
+| `digest` | string or null | SHA-256 of the manifest when the state is intact; null otherwise |
 | `counts.pathways` | integer | Pathway records found |
 | `counts.atoms` | integer | Atom records found |
 | `counts.chokepoints` | integer | Chokepoint records found |
@@ -415,14 +439,46 @@ Verification may run while other processes record runs under the same root. An a
 | `attempts.abandoned` | array | Identifiers of attempts whose recorder stopped; each is also a problem |
 | `problems` | array | Objects containing `record` and `problem` strings |
 
-Verification establishes consistency among local records and logs. It does not establish authorship or reproduce external execution conditions.
+The text view prints the digest on its own line when the state is intact.
+
+Verification establishes consistency among local records and logs. It does not establish authorship or reproduce external execution conditions. Checksums kept inside the state cannot show that a record was rewritten together with its checksum; `--against` with a manifest kept elsewhere can.
 
 #### Exit status
 
 | Status | Meaning |
 | --- | --- |
 | 0 | No verification problems were found |
-| 2 | State was missing, unreadable, malformed, inconsistent, or failed verification |
+| 2 | State was missing, unreadable, malformed, inconsistent, or failed verification; or the `--against` file was unreadable, malformed, or listed no records |
+
+## `manifest`
+
+Verify the complete state, then print one checksum line for every record.
+
+```text
+ocura-oss manifest [--root PATH] [--json]
+```
+
+#### Options
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `--root PATH` | path | current directory | Project root containing initialized state |
+| `--json` | flag | false | Emit the digest and entries as JSON |
+
+#### Output
+
+Each line is `KIND ID CHECKSUM`, where `KIND` is `den`, `pathway`, `atom`, or `chokepoint` and `CHECKSUM` is that record's stored SHA-256. Lines are sorted. JSON mode returns `{"digest": "...", "entries": [...]}`; the digest is the SHA-256 of the lines, each terminated by a newline.
+
+Keep the output where this state's writers cannot change it and pass it to `verify --against` later. See [retained manifests](state-and-verification.md#retained-manifests) for what that detects and its limits.
+
+A manifest is printed only for a state that verifies completely. Attempts still being recorded are not records yet and are not listed.
+
+#### Exit status
+
+| Status | Meaning |
+| --- | --- |
+| 0 | The state verified and the manifest was emitted |
+| 2 | State was missing or failed verification; no manifest was emitted |
 
 ## `attempts`
 

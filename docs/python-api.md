@@ -116,6 +116,9 @@ run(
     mirror: bool = False,
     capture: bool = True,
     masked_arguments: Iterable[int] = (),
+    substitute: bool = False,
+    context: bool = False,
+    context_files: Iterable[os.PathLike[str] | str] = (),
 ) -> RunExecution
 ```
 
@@ -132,6 +135,9 @@ Run one trusted local command and record terminal evidence.
 | `mirror` | boolean | `False` | Stream stdout and stderr to the current terminal while retaining the same bytes in logs |
 | `capture` | boolean | `True` | Retain stdout and stderr as logs; `False` writes no output to disk and records that it was not captured |
 | `masked_arguments` | iterable of integers | `()` | Zero-based positions in `command` whose tokens are stored as `<masked>`; the command still receives the real values |
+| `substitute` | boolean | `False` | Replace `{KEY}` in command tokens with that parameter's value, and record each parameter used |
+| `context` | boolean | `False` | Record the platform and the git revision and dirty state at launch |
+| `context_files` | iterable of paths | `()` | Files whose size and SHA-256 are recorded at launch; relative paths are resolved against the project root |
 
 #### Returns
 
@@ -141,7 +147,7 @@ Run one trusted local command and record terminal evidence.
 
 | Exception | Condition |
 | --- | --- |
-| `StoreError` | Command tokens, masked positions, parameter data, state, pathway, or evidence persistence is invalid |
+| `StoreError` | Command tokens, masked positions, placeholders, parameter data, state, pathway, or evidence persistence is invalid, or a context file cannot be read |
 
 Child command failures and launch failures are returned as atom outcomes rather than raised as exceptions.
 
@@ -165,6 +171,10 @@ The child runs with `shell=False` and the project root as its working directory.
 Stdout and stderr are stored separately under `.ocura-oss/logs/`. With `capture=False`, no log files are written: the returned atom has `output_capture` set to `OutputCapture.NONE` and `None` in its six log fields, and `mirror=True` still streams the output.
 
 Each position in `masked_arguments` must index `command`; position 0 is the executable. The attempt and atom records store `<masked>` at those positions and list them. Masking does not alter output, so a command that prints a masked value still writes it to a captured log.
+
+With `substitute=True`, a value comes from `parameters` first and then from the pathway's effective parameters. The returned atom's `command` is the substituted command, and its `declared_parameters` are `parameters` plus every parameter a placeholder used. `{{` and `}}` are literal braces; a placeholder without a value, or an unbalanced brace, raises `StoreError` before anything runs. Braces are untouched when `substitute` is false.
+
+`context` and `context_files` fill the returned atom's `context` with a `RunContext`; it is `None` when neither is used. Nothing is queried, executed, or read for context otherwise. See [optional launch context](state-and-verification.md#optional-launch-context) for what is recorded and what it does not establish.
 
 The attempt is journaled under `.ocura-oss/attempts/` before the command launches. One atom and one branchable terminal chokepoint are written after the command ends, and the journal entry is then removed. A second Ctrl+C, or a killed process, leaves the entry in place; `recover()` closes it. Several processes may call `run()` against one root at the same time.
 
@@ -293,6 +303,8 @@ if result.state is ComparisonState.PARTIAL:
 ```python
 verify(
     root: os.PathLike[str] | str | None = None,
+    *,
+    against: Iterable[str] | None = None,
 ) -> StateVerification
 ```
 
@@ -303,6 +315,7 @@ Recheck every state record and every log referenced by a recorded run.
 | Name | Type | Default | Description |
 | --- | --- | --- | --- |
 | `root` | path-like, string, or None | `None` | Project root containing initialized state |
+| `against` | iterable of strings, or None | `None` | Manifest lines retained from an earlier verification; each must still be present unchanged. Blank lines and lines starting with `#` are skipped; a manifest left with no entries is an error |
 
 #### Returns
 
@@ -312,7 +325,7 @@ Recheck every state record and every log referenced by a recorded run.
 
 | Exception | Condition |
 | --- | --- |
-| `StoreError` | Initialized state is absent or the den record is missing, unreadable, malformed, or unverifiable |
+| `StoreError` | Initialized state is absent; the den record is missing, unreadable, malformed, or unverifiable; or `against` has a malformed entry or lists no records |
 
 Problems in other records and logs are normally collected in the returned report instead of raised.
 
@@ -322,16 +335,27 @@ Verification checks record envelopes, checksums, identifiers, filenames, require
 
 It may run while other processes record runs under the same root. An attempt that a live process is still recording appears in `running_attempts` and is not a problem. An abandoned attempt is a problem until `recover()` closes it.
 
+When the state is intact, `report.manifest` holds one `KIND ID CHECKSUM` line per verified record and `report.digest` is the SHA-256 of those lines. Retain the manifest where this state's writers cannot change it and pass it back as `against` to detect a record that was rewritten together with its checksum. Records added since are allowed. See [retained manifests](state-and-verification.md#retained-manifests).
+
 Verification establishes local consistency among records and logs. Authorship and execution-environment reproduction require separate evidence.
 
 #### Example
 
 ```python
+from pathlib import Path
+
 from ocura_oss import verify
 
 report = verify("experiment")
 for record, problem in report.problems:
     print(record, problem)
+
+retained = Path("trusted/experiment.manifest")
+if report.ok:
+    retained.write_text("".join(f"{line}\n" for line in report.manifest))
+
+# Later, possibly after more runs:
+assert verify("experiment", against=retained.read_text().splitlines()).ok
 ```
 
 ### `ocura_oss.recover`
@@ -832,14 +856,17 @@ Use top-level `initialize()` when the resolved root should be included in the re
 ### `Store.verify_state`
 
 ```python
-store.verify_state() -> StateVerification
+store.verify_state(
+    *,
+    against: Iterable[str] | None = None,
+) -> StateVerification
 ```
 
 Verify every state record and every log referenced by a valid atom.
 
 #### Returns
 
-`StateVerification`. Problems outside the den are collected by record name when possible. `logs_checked` counts individual log files that passed verification. `running_attempts` and `abandoned_attempts` name unfinished attempts.
+`StateVerification`. Problems outside the den are collected by record name when possible. `logs_checked` counts individual log files that passed verification. `running_attempts` and `abandoned_attempts` name unfinished attempts. `manifest` and `digest` are filled when the state is intact. `against` behaves as described for top-level [`verify()`](#ocura_ossverify).
 
 #### Raises
 
@@ -965,6 +992,7 @@ Atom(
     stderr_sha256: str | None,
     output_capture: OutputCapture = OutputCapture.FULL,
     masked_arguments: tuple[int, ...] = (),
+    context: RunContext | None = None,
 )
 ```
 
@@ -992,6 +1020,7 @@ One recorded command attempt and its referenced output logs.
 | `stderr_sha256` | string or None | Lowercase SHA-256 digest of stderr bytes |
 | `output_capture` | `OutputCapture` | Whether stdout and stderr were retained as logs |
 | `masked_arguments` | tuple of integers | Ascending positions in `command` that hold the masked placeholder |
+| `context` | `RunContext` or None | Launch context, when it was requested |
 
 Outcome, return code, and launch category must satisfy the invariants described by `run()`. An abandoned atom carries neither a return code nor a launch category.
 
@@ -1011,6 +1040,7 @@ Attempt(
     stderr_log: str | None,
     output_capture: OutputCapture = OutputCapture.FULL,
     masked_arguments: tuple[int, ...] = (),
+    context: RunContext | None = None,
 )
 ```
 
@@ -1030,8 +1060,44 @@ One run that has started and is not yet finalized, as returned by `Store.list_at
 | `stderr_log` | string or None | Project-relative stderr log path; `None` without capture |
 | `output_capture` | `OutputCapture` | Whether stdout and stderr are being retained as logs |
 | `masked_arguments` | tuple of integers | Ascending positions in `command` that hold the masked placeholder |
+| `context` | `RunContext` or None | Launch context, when it was requested |
 
 An attempt has no outcome, byte counts, or digests: its logs may still be growing.
+
+### `ocura_oss.RunContext`
+
+```python
+RunContext(
+    platform: Mapping[str, str] | None,
+    git_revision: str | None,
+    git_dirty: bool | None,
+    files: Mapping[str, FileDigest],
+)
+```
+
+Facts about where a command attempt started, recorded only on request.
+
+#### Attributes
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `platform` | mapping of string to string, or None | `system`, `release`, and `machine` of the recording machine; `None` unless `context=True` |
+| `git_revision` | string or None | Full object name of the checked-out commit; `None` unless `context=True` found a work tree with a commit |
+| `git_dirty` | boolean or None | Whether the work tree had modified or untracked files other than `.ocura-oss/`; `None` whenever `git_revision` is |
+| `files` | mapping of string to `FileDigest` | One entry per file named in `context_files`, keyed by the path as given with forward slashes |
+
+Context describes the moment of launch. Verification does not recheck it.
+
+### `ocura_oss.FileDigest`
+
+```python
+FileDigest(
+    bytes: int,
+    sha256: str,
+)
+```
+
+Size and lowercase SHA-256 digest of one file named for context capture.
 
 ### `ocura_oss.RecoveredAttempt`
 
@@ -1253,6 +1319,8 @@ StateVerification(
     problems: tuple[tuple[str, str], ...],
     running_attempts: tuple[str, ...] = (),
     abandoned_attempts: tuple[str, ...] = (),
+    manifest: tuple[str, ...] = (),
+    digest: str | None = None,
 )
 ```
 
@@ -1269,6 +1337,8 @@ Result of verifying records and referenced logs under one state directory.
 | `problems` | tuple of pairs | `(record, problem)` entries collected during verification |
 | `running_attempts` | tuple of strings | Attempts a live process is still recording; not problems |
 | `abandoned_attempts` | tuple of strings | Attempts whose recorder stopped; each also appears in `problems` |
+| `manifest` | tuple of strings | Sorted `KIND ID CHECKSUM` lines for every verified record; empty when there are problems |
+| `digest` | string or None | SHA-256 of the manifest lines, each newline-terminated; `None` when there are problems |
 
 #### Properties
 
