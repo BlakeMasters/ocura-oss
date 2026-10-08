@@ -12,14 +12,20 @@ records and logs before branching or comparing them.
 Use it from your terminal, Python scripts, or an AI agent with a shell. The CLI
 provides JSON output throughout the workflow; the Python API returns typed results.
 
-## New in 0.5.0
+## Why use it
 
-**Version 0.5.0 changes the record format to schema 2. It cannot read or convert a
-`.ocura-oss/` directory written by 0.4 or earlier.** Commands pointed at old state stop
-with exit status 2 and leave it untouched. Stay on 0.4 for a project whose records you
-still need (`python -m pip install "ocura-oss<0.5"`), or move the old directory aside
-and run `ocura-oss init`. See [upgrading from 0.4](state-and-verification.md#upgrading-from-04)
-before you upgrade.
+Ocura OSS aims to be the easiest way to start recording runs in a new project,
+especially for local development:
+
+- **No dependencies.** The package uses only the Python standard library. There is
+  no server, database, account, or configuration file.
+- **Almost no setup.** `ocura-oss init` is the only setup step. Everything is kept
+  as JSON records and logs in one `.ocura-oss/` directory inside your project.
+- **Easy to hand to an agent.** Every command accepts `--json` and returns a
+  documented exit code, so an AI agent with a shell can set it up and run the
+  whole workflow.
+
+## New in 0.5.0
 
 - **Unfinished runs stay visible.** Each run is journaled before its command starts.
   If the recording process is interrupted twice or killed, `ocura-oss attempts` shows
@@ -41,6 +47,13 @@ before you upgrade.
 The core runtime still uses only the standard library. See
 [state and verification](state-and-verification.md) for the format, attempts,
 concurrent use, and the limits of each option.
+
+**Upgrading from 0.4:** version 0.5.0 changes the record format to schema 2. It cannot
+read or convert a `.ocura-oss/` directory written by 0.4 or earlier. Commands pointed
+at old state stop with exit status 2 and leave it untouched. Stay on 0.4 for a project
+whose records you still need (`python -m pip install "ocura-oss<0.5"`), or move the old
+directory aside and run `ocura-oss init`. See
+[upgrading from 0.4](state-and-verification.md#upgrading-from-04) before you upgrade.
 
 ## Install and try
 
@@ -161,9 +174,6 @@ authenticate authorship or prevent a writer from replacing records and checksums
 
 Ocura OSS is research software under [MPL-2.0](../LICENSE). The 0.x interface and record
 format may change before 1.0, and there is no production support commitment.
-
-The package adapts an early Ocura research concept. Current Ocura engine development
-is a separate project.
 
 Bug reports and focused pull requests are welcome. See [Contributing](../CONTRIBUTING.md)
 and the [security policy](../SECURITY.md).

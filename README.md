@@ -10,6 +10,19 @@ records and logs before branching or comparing them.
 Use it from your terminal, Python scripts, or an AI agent with a shell. The CLI
 provides JSON output throughout the workflow; the Python API returns typed results.
 
+## Why use it
+
+Ocura OSS aims to be the easiest way to start recording runs in a new project,
+especially for local development:
+
+- **No dependencies.** The package uses only the Python standard library. There is
+  no server, database, account, or configuration file.
+- **Almost no setup.** `ocura-oss init` is the only setup step. Everything is kept
+  as JSON records and logs in one `.ocura-oss/` directory inside your project.
+- **Easy to hand to an agent.** Every command accepts `--json` and returns a
+  documented exit code, so an AI agent with a shell can set it up and run the
+  whole workflow.
+
 ## Install and try
 
 Python 3.11 or later is required. Ocura OSS uses only the standard library at runtime.
@@ -24,16 +37,6 @@ ocura-oss demo --root ./ocura-oss-demo
 The demo runs the complete workflow and retains a new directory for inspection.
 Its destination must not already exist. To install a repository checkout instead,
 run `python -m pip install .` from its root.
-
-## Upgrading from 0.4
-
-**Version 0.5 cannot read a `.ocura-oss/` directory written by 0.4 or earlier, and does
-not convert one.** Commands pointed at old state stop with exit status 2 and say so;
-the directory is left untouched. To keep working with existing records, stay on 0.4
-for that project (`python -m pip install "ocura-oss<0.5"`). To record with 0.5, move
-the old directory aside and run `ocura-oss init`. The
-[upgrade notes](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/state-and-verification.md#upgrading-from-04)
-cover each case.
 
 ## Compare two runs
 
@@ -137,13 +140,20 @@ out of these fields; `run --mask-arg` and `run --no-capture` cover a command tok
 output that cannot be avoided. SHA-256 checksums detect local inconsistencies; they do not
 authenticate authorship or prevent a writer from replacing records and checksums.
 
+## Upgrading from 0.4
+
+**Version 0.5 cannot read a `.ocura-oss/` directory written by 0.4 or earlier, and does
+not convert one.** Commands pointed at old state stop with exit status 2 and say so;
+the directory is left untouched. To keep working with existing records, stay on 0.4
+for that project (`python -m pip install "ocura-oss<0.5"`). To record with 0.5, move
+the old directory aside and run `ocura-oss init`. The
+[upgrade notes](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/state-and-verification.md#upgrading-from-04)
+cover each case.
+
 ## Project status
 
 Ocura OSS is research software under [MPL-2.0](https://github.com/BlakeMasters/ocura-oss/blob/main/LICENSE). The 0.x interface and record
 format may change before 1.0, and there is no production support commitment.
-
-The package adapts an early Ocura research concept. Current Ocura engine development
-is a separate project.
 
 Bug reports and focused pull requests are welcome. See [Contributing](https://github.com/BlakeMasters/ocura-oss/blob/main/CONTRIBUTING.md)
 and the [security policy](https://github.com/BlakeMasters/ocura-oss/blob/main/SECURITY.md).
