@@ -38,12 +38,18 @@ python -m twine check dist/*
 ```
 
 Continuous integration runs the tests on Linux, macOS, and Windows for each supported
-Python version, and runs the remaining checks once.
+Python version, and runs the remaining checks once. It then installs the built wheel
+and the built source distribution on all three systems and runs the tests against the
+installed copy. It also runs the README's commands in bash and in both PowerShell
+versions, using `.github/scripts/quickstart.sh` and `.github/scripts/quickstart.ps1`.
+When you change a command that the README shows, update those two scripts to match.
 
 The test suite uses `unittest`; pytest is not required. Please add or update tests when behavior changes, and update the README and changelog when a public command or record changes.
 
 When changing examples, also run Ruff on `examples/` and use the optional integration
 checks described in [the autoregressive guide](https://github.com/BlakeMasters/ocura-oss/blob/main/examples/autoregressive/README.md).
+Continuous integration lints `examples/` and runs the PyTorch and JAX check on Linux;
+it does not run the Ray check.
 The normal test suite keeps framework imports optional. Examples, their requirements,
 and their tests stay in the repository and are excluded from both distributions.
 The core package stays dependency-free.
