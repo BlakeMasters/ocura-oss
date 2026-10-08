@@ -11,12 +11,15 @@ variations, with reasons, outputs, and verification.
 1. Call `init --json` once and retain the project root and default pathway ID.
 2. Execute the baseline through `run --json`; retain its `chokepoint_id`.
 3. Call `branch --json --from ID --reason TEXT` with the proposed parameter labels.
-4. Pass the returned branch `id` to the next `run --pathway ID --json`.
+4. Pass the returned branch `id` to the next `run --pathway ID --json`. That run
+   records the branch's labels; repeat a `--param` only to replace one.
 5. Read `verify --json` and `compare --json --from ID` before using the results.
 6. Consume the referenced output through `Store.read_verified_log()` for the metrics your task needs.
 
 All invocations must use the intended `--root`. The returned IDs connect the steps
-without scraping text. Parameters label the record; set actual command arguments
+without scraping text. Pass them in full: the shortened IDs the CLI accepts are for
+typing by hand, and a prefix that matches one record now can match two later.
+Parameters label the record; set actual command arguments
 separately, or pass `--substitute` and write `{KEY}` in the command so one
 declaration does both. A program that builds the argument list itself needs no
 quoting; a PowerShell command line must quote the placeholder. Handle nonzero exits: `run` still returns a recorded result for a failed

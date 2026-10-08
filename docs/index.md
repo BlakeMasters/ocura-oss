@@ -29,6 +29,13 @@ especially for local development:
 
 - **Apache-2.0 license.** Version 0.6.0 and later are released under the Apache
   License 2.0. Versions 0.5.0 and earlier remain under MPL-2.0.
+- **IDs can be shortened.** `branch --from`, `compare --from`, and `run --pathway`
+  accept the first four or more hexadecimal characters of an ID when they match
+  one record.
+- **A run on a branch records the branch's parameters.** The child `run` no longer
+  repeats them. A `--param` on the run still replaces the value for its key.
+- **The first error says what to do.** A command run where there is no state names
+  `ocura-oss init`, or the directory above that already holds state.
 
 The record format is unchanged: 0.6.0 reads and extends state written by 0.5.0.
 
@@ -83,19 +90,22 @@ run `python -m pip install .` from its root.
 ocura-oss init --name example --json
 ocura-oss run --json --param count=1 -- python -c "print(1)"
 ocura-oss branch --json --from <chokepoint-id> --reason "try count 2" --param count=2
-ocura-oss run --json --pathway <child-pathway-id> --param count=2 -- python -c "print(2)"
+ocura-oss run --json --pathway <child-pathway-id> -- python -c "print(2)"
 ocura-oss verify --json
 ocura-oss compare --json --from <chokepoint-id>
 ```
 
 Use the baseline's `chokepoint_id` to branch and the branch result's `id` for the
-child run. `compare` reports each variant's relationship to its source, parameter
-changes, outcomes, and timing. Read the recorded output logs for workload-specific
-metrics, such as validation loss or accuracy.
+child run. When typing an ID by hand, its first four or more hexadecimal characters
+are enough if they match one record. `compare` reports each variant's relationship
+to its source, parameter changes, outcomes, and timing. Read the recorded output
+logs for workload-specific metrics, such as validation loss or accuracy.
 
 **Parameters are recorded labels.** Set actual inputs in your command as well:
-`--param batch=4 -- python train.py --batch 4`. Each run records its own labels.
-To declare a value once, add `--substitute` and write `"{batch}"` in the command.
+`--param batch=4 -- python train.py --batch 4`. A run on a branch records the
+branch's parameters without repeating them, and can add or replace labels with its
+own `--param`. To declare a value once, add `--substitute` and write `"{batch}"` in
+the command.
 
 Omit `--json` for terminal output. By default, `run` streams the command's output
 while retaining stdout and stderr logs; `--json` or `--quiet` keeps that output in

@@ -44,19 +44,22 @@ run `python -m pip install .` from its root.
 ocura-oss init --name example --json
 ocura-oss run --json --param count=1 -- python -c "print(1)"
 ocura-oss branch --json --from <chokepoint-id> --reason "try count 2" --param count=2
-ocura-oss run --json --pathway <child-pathway-id> --param count=2 -- python -c "print(2)"
+ocura-oss run --json --pathway <child-pathway-id> -- python -c "print(2)"
 ocura-oss verify --json
 ocura-oss compare --json --from <chokepoint-id>
 ```
 
 Use the baseline's `chokepoint_id` to branch and the branch result's `id` for the
-child run. `compare` reports each variant's relationship to its source, parameter
-changes, outcomes, and timing. Read the recorded output logs for workload-specific
-metrics, such as validation loss or accuracy.
+child run. When typing an ID by hand, its first four or more hexadecimal characters
+are enough if they match one record. `compare` reports each variant's relationship
+to its source, parameter changes, outcomes, and timing. Read the recorded output
+logs for workload-specific metrics, such as validation loss or accuracy.
 
 **Parameters are recorded labels.** Set actual inputs in your command as well:
-`--param batch=4 -- python train.py --batch 4`. Each run records its own labels.
-To declare a value once, add `--substitute` and write `"{batch}"` in the command.
+`--param batch=4 -- python train.py --batch 4`. A run on a branch records the
+branch's parameters without repeating them, and can add or replace labels with its
+own `--param`. To declare a value once, add `--substitute` and write `"{batch}"` in
+the command.
 
 Omit `--json` for terminal output. By default, `run` streams the command's output
 while retaining stdout and stderr logs; `--json` or `--quiet` keeps that output in
@@ -92,7 +95,7 @@ from ocura_oss import branch, compare, initialize, run, verify
 root = initialize("experiment", name="example").root
 baseline = run([sys.executable, "-c", "print(1)"], root=root, parameters={"count": "1"})
 child = branch(baseline.chokepoint.id, root=root, reason="try count 2", parameters={"count": "2"})
-run([sys.executable, "-c", "print(2)"], root=root, pathway_id=child.id, parameters={"count": "2"})
+run([sys.executable, "-c", "print(2)"], root=root, pathway_id=child.id)
 assert verify(root).ok
 comparison = compare(baseline.chokepoint.id, root=root)
 ```

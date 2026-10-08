@@ -72,11 +72,11 @@ class SubstitutionTests(ProvenanceTestCase):
             baseline.chokepoint.id,
             root=self.root,
             reason="larger batch",
-            parameters={"batch": "8", "unused": "kept-on-pathway"},
+            parameters={"batch": "8", "unused": "not-in-command"},
         )
         atom = self.run_substituted("{batch}", pathway_id=child.id)
         self.assertEqual(self.output(atom), "8")
-        self.assertEqual(atom.declared_parameters, {"batch": "8"})
+        self.assertEqual(atom.declared_parameters, {"batch": "8", "unused": "not-in-command"})
 
     def test_declared_value_overrides_the_pathway_value(self):
         baseline = ocura_oss.run([sys.executable, "-c", "pass"], root=self.root)
