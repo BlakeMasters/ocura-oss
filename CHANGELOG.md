@@ -2,6 +2,34 @@
 
 This file records user-visible changes to Ocura OSS.
 
+## 0.5.0 - Unreleased
+
+- **Breaking:** change the record format to schema version 2. State written by 0.4 and
+  earlier is rejected with exit status 2 and left untouched; there is no migration. To
+  keep using existing records, stay on 0.4 for that project (`ocura-oss<0.5`). To record
+  with 0.5, move the old `.ocura-oss/` aside and run `ocura-oss init`. See "Upgrading
+  from 0.4" in `docs/state-and-verification.md`. `Atom` log fields, `finished_at`, and `duration_seconds`
+  may now be `None`, and `RunSummary.duration_seconds` may be `None`.
+- Journal each run under `.ocura-oss/attempts/` before its command launches. An attempt
+  whose recording process is interrupted twice or killed stays visible instead of leaving
+  orphaned logs. Add `ocura-oss attempts` and `Store.list_attempts()` to list unfinished
+  attempts as `running` or `abandoned`.
+- Add `ocura-oss recover`, `recover()`, and `Store.recover()` to close abandoned attempts.
+  One with no recorded outcome becomes an atom with the new `abandoned` outcome: its
+  captured output is retained, and no finish time, duration, or return code is invented.
+- Support several processes recording runs under one state root at once. `verify` and
+  `compare` work while runs are in flight and report them as running rather than as damage.
+  Of several concurrent `init` calls, exactly one succeeds.
+- Report an atom that does not have exactly one chokepoint as a verification problem.
+- Add `run --no-capture` and `run(capture=False)` to retain no stdout or stderr. The atom
+  records `output_capture: none` instead of log paths.
+- Add `run --mask-arg POSITION` and `run(masked_arguments=[...])` to store a placeholder for
+  chosen command tokens while the command still receives the real values.
+- State how the format evolves: readers ignore payload fields they do not recognize, so a
+  schema version can gain optional fields without another break.
+- Publish releases from GitHub Actions through PyPI Trusted Publishing.
+- Keep the core runtime dependency-free.
+
 ## 0.4.0 - 2026-09-16
 
 - Add `Store.read_verified_log()` to read stdout or stderr as bytes and verify

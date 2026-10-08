@@ -1,6 +1,6 @@
 # State and verification
 
-Version 0.4.0.
+Version 0.5.0.
 
 Ocura OSS stores records and command output under `.ocura-oss/` in one project directory. It does not use a service or a global project index.
 
@@ -15,12 +15,15 @@ Ocura OSS stores records and command output under `.ocura-oss/` in one project d
     <atom-id>.json
   chokepoints/
     <chokepoint-id>.json
+  attempts/
+    <atom-id>.json
+    <atom-id>.lock
   logs/
     <atom-id>.stdout.log
     <atom-id>.stderr.log
 ```
 
-One mutating process per state root is supported at a time.
+`attempts/` holds one entry for each run that has started and is not yet finalized. It is empty when nothing is running and nothing was abandoned.
 
 ## Record envelope
 
@@ -28,7 +31,7 @@ Each JSON record contains an envelope:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "atom",
   "payload": {},
   "checksum": {
@@ -40,16 +43,96 @@ Each JSON record contains an envelope:
 
 The checksum covers the schema version, kind, and canonical payload. It provides local change detection. It is not an authenticated signature and does not establish authorship.
 
+## Format compatibility
+
+Records carry schema version 2. This release reads schema 2 only. State written by Ocura OSS 0.4 and earlier carries schema 1 and is rejected; see [upgrading from 0.4](#upgrading-from-04). Legacy `.ocura/` state is not compatible either.
+
+Within one schema version, a record changes only by gaining optional fields:
+
+- A reader ignores payload fields it does not recognize, so a record from a later release that keeps the same schema version stays readable.
+- An added field must be safe to ignore. A field that changes the meaning of existing fields, a new required field, a removed or renamed field, a changed type, or a new enumeration value requires a new schema version.
+- The envelope's four keys are fixed.
+
+The repository keeps a small ledger written by 0.5.0 as a test fixture. Every later release that keeps schema 2 must verify it unchanged.
+
+This describes how the format changes. It is not a commitment that schema 2 is final: the 0.x status in the [overview](index.md#project-status) still applies.
+
+### Upgrading from 0.4
+
+Version 0.5 cannot read a `.ocura-oss/` directory written by 0.4 or earlier, and it does not convert one. Every command pointed at such a directory, including `verify`, stops with exit status 2 and a message naming the cause:
+
+```text
+error: unsupported schema version 1 in den record den.json; Ocura OSS 0.4 and earlier wrote this state, and this version cannot read or convert it. Keep using "ocura-oss<0.5" for it, or move .ocura-oss aside and run `ocura-oss init`
+```
+
+The old directory is never modified. Decide per project before upgrading:
+
+| You want to | Do this |
+| --- | --- |
+| Keep working with the existing records | Stay on 0.4 for that project: `python -m pip install "ocura-oss<0.5"` in its environment. 0.4 reads and extends the directory as before |
+| Start recording with 0.5 in the same project | Move the old directory aside, then run `ocura-oss init`. For example `mv .ocura-oss .ocura-oss-0.4`, or in PowerShell `Rename-Item .ocura-oss .ocura-oss-0.4` |
+| Look at old records after upgrading | The logs under the moved directory's `logs/` are plain files, and the records are plain JSON. To use 0.4's commands on them again, move the directory back to `.ocura-oss` in an environment that has 0.4 |
+
+A new state directory starts empty. Identifiers from the old one are unknown to it, so a branch cannot name an old chokepoint as its source: record the baseline again under 0.5 before branching from it.
+
+If you need comparisons or listings from the old records later, save them with 0.4 first, for example `ocura-oss compare --json --from ID` and `ocura-oss chokepoints --json`.
+
 ## Record relationships
 
 - The den identifies one default pathway.
 - Every pathway belongs to that den.
 - A child pathway identifies both its parent and the source chokepoint on that parent.
 - Every atom belongs to an existing pathway.
+- Every atom has exactly one chokepoint.
 - Every chokepoint belongs to the same pathway as its atom and has the same outcome.
 - Record filenames match their payload IDs.
 
 A branch records lineage metadata only. A later run must name the child pathway to attach evidence to it.
+
+## Attempts and recovery
+
+A run is journaled before its command launches, so an attempt stays visible even when the process recording it never gets to finish:
+
+1. `run` takes an operating-system lock on `attempts/<atom-id>.lock`, then writes `attempts/<atom-id>.json`. That attempt record holds the pathway, the identifiers reserved for the atom and chokepoint, the start time, the recorded command, and the declared parameters.
+2. The command runs.
+3. `run` writes the atom, then the chokepoint, then removes the attempt record and releases the lock.
+
+The operating system releases the lock when the recording process exits for any reason, including a forced kill. The recorder holds the lock exclusively; anything that only asks whether a recorder is alive takes it shared, so concurrent verifiers and listings never mistake one another for a recorder. An attempt record is therefore in one of two states:
+
+| State | Meaning |
+| --- | --- |
+| `running` | A live process holds the attempt's lock and is still recording it |
+| `abandoned` | No process holds the lock; the recorder stopped before finalizing the attempt |
+
+`ocura-oss attempts` and `Store.list_attempts()` list unfinished attempts with their state. `ocura-oss recover` and `recover()` close each abandoned attempt according to how far its recorder got:
+
+| The recorder had written | Action | Result |
+| --- | --- | --- |
+| Only the attempt record | `abandoned` | An atom with outcome `abandoned` and its terminal chokepoint |
+| The atom | `completed` | The missing chokepoint, carrying the atom's recorded outcome |
+| The atom and chokepoint | `cleared` | Nothing new; the leftover attempt record is removed |
+
+An `abandoned` atom states what is known and nothing else. It keeps the start time, recorded command, and declared parameters, and has no finish time, duration, return code, or launch category. Whatever output had been captured is retained: recovery measures each log as it finds it and records that size and digest, so the logs verify from then on. An abandoned atom's chokepoint is branchable, like any other.
+
+Running attempts are never touched by recovery. Recovery needs each abandoned attempt's lock to itself, and waits about a quarter of a second for a reader that is checking the same attempt. If a reader holds on longer than that, recovery leaves that attempt for the next call; verification keeps reporting it as abandoned in the meantime.
+
+Limits:
+
+- Ocura OSS does not stop a command when its recorder stops. A command that outlives its recorder keeps running and can keep writing to its logs. Recover only after that command has stopped; otherwise later verification reports its log as changed.
+- The locks are advisory operating-system file locks. They are reliable on local filesystems. On a network filesystem, a running attempt may be reported as abandoned or the reverse.
+
+## Concurrent use
+
+Several processes may record runs under one state root at the same time. Each run writes only files named with its own freshly generated identifiers, every record appears atomically, and nothing written by one run is rewritten by another.
+
+`verify` and `compare` may run while other runs are in flight. A running attempt is reported as in progress and is not a problem; its logs are not checked until it is finalized.
+
+Ocura OSS does not coordinate anything outside its own records:
+
+- Concurrent commands share the project root as their working directory. Keeping their workspace files apart is the workload's job.
+- Listings order records by recorded timestamp and then identifier. Runs that overlap in time have no other ordering.
+- `compare` without an explicit source selects the newest branched source at the moment it runs. Pass the source chokepoint when other work may be adding branches.
+- Of several processes initializing the same root at once, exactly one succeeds.
 
 ## Verification
 
@@ -61,8 +144,10 @@ A branch records lineage metadata only. A later run must name the child pathway 
 - required fields and semantic outcome invariants
 - den, pathway, atom, and chokepoint references
 - lineage cycles and source-parent agreement
+- that every atom has exactly one chokepoint
 - referenced log containment, existence, size, and SHA-256 digest
 - unreferenced files or unexpected directories under `logs/`
+- unfinished attempts: a running attempt is listed, and an abandoned attempt is a problem until it is recovered
 
 The report counts records that were structurally readable and logs that passed evidence verification. Problems identify the affected record or log.
 
@@ -85,18 +170,32 @@ The read is scoped to the selected stream: it does not verify the other stream,
 unrelated records, or the whole ledger. Continue to use `verify()` or
 `Store.verify_state()` for a complete check. It does not lock the ledger or provide
 an atomic snapshot; returned bytes remain unchanged if the file changes afterward.
+An atom recorded without output capture has no log, and the read raises `StoreError`.
 See the [Python API](python-api.md#storeread_verified_log) for usage and errors.
 
 ## Stored information
 
-Atoms retain command arguments, outcomes, timing, return codes, declared parameters, log paths, byte counts, and log digests. Logs retain command output. Pathways retain branch reasons and effective declared parameters.
+Atoms retain command arguments, outcomes, timing, return codes, declared parameters, log paths, byte counts, and log digests. Logs retain command output. Pathways retain branch reasons and effective declared parameters. An unfinished attempt retains the same command arguments and declared parameters as the atom it becomes.
 
 Environment values are inherited by the child process but are not serialized. Dependency versions, source revisions, workspace contents, process memory, network activity, and external-system state are not recorded.
 
-Keep secrets out of command arguments, parameters, reasons, and command output.
+### Keeping sensitive values out of records
+
+Two options limit what a run stores. Both are stated in the record, so a reader can tell an omission from an absence:
+
+| Option | Effect | Recorded as |
+| --- | --- | --- |
+| `run --no-capture`, or `capture=False` | No stdout or stderr is written to disk | `output_capture` is `none`, and the six log fields are null |
+| `run --mask-arg POSITION`, or `masked_arguments=[...]` | The command token at that zero-based position is stored as `<masked>` in the attempt and the atom; the command still receives the real value | `masked_arguments` lists the masked positions |
+
+`output_capture` is `full` for an ordinary run. A command token that happens to equal `<masked>` is not listed in `masked_arguments`, so it is not mistaken for a masked one.
+
+These options are explicit, and nothing is detected automatically:
+
+- Masking covers command tokens in records. It does not alter output: a command that prints a masked value still writes it to a captured log. Combine it with `--no-capture` when that matters.
+- Declared parameters and branch reasons are stored as given. Keep secrets out of them.
+- A masked value remains visible to the operating system as an argument of the running process.
 
 ## Execution boundary
 
 Commands run directly on the local machine with `shell=False` and the project root as the working directory. Ocura OSS does not sandbox commands, restrict network access, or isolate process trees. Use it only for trusted, same-owner local workloads.
-
-Legacy `.ocura/` state is not compatible with `.ocura-oss/` records.

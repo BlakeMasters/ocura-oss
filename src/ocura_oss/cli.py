@@ -111,8 +111,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "While the command runs, its output streams to your terminal and is"
             " recorded under .ocura-oss/logs/. If you press Ctrl+C, the partial"
             " attempt is still recorded as interrupted evidence; a second"
-            " Ctrl+C exits immediately instead. With --json, command output"
+            " Ctrl+C exits immediately and leaves the attempt unfinished until"
+            " `ocura-oss recover` closes it. With --json, command output"
             " stays in the logs and stdout contains one result object.\n"
+            "Use --no-capture when output must not be retained, and --mask-arg"
+            " for a command token that must not be recorded.\n"
             "Exit codes: 0 passed, 1 command failed or was interrupted,"
             " 3 could not launch; every attempt produces a terminal chokepoint."
         ),
@@ -145,6 +148,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="print one result as JSON; command output is retained in logs without streaming",
+    )
+    run_parser.add_argument(
+        "--no-capture",
+        action="store_true",
+        help="retain no stdout or stderr; the record states that output was not captured",
+    )
+    run_parser.add_argument(
+        "--mask-arg",
+        action="append",
+        default=[],
+        type=int,
+        metavar="POSITION",
+        help=(
+            "record a placeholder instead of the COMMAND token at this zero-based"
+            " position; COMMAND still receives the real value; repeatable"
+        ),
     )
     run_parser.add_argument(
         "command",
@@ -266,8 +285,10 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Validates record envelopes, checksums, references, and semantic"
             " consistency; verifies each referenced log's size and SHA-256;"
-            " reports orphaned files under .ocura-oss/logs/. Exits 0 when intact"
-            " and 2 with an explicit problem list otherwise."
+            " reports orphaned files under .ocura-oss/logs/, atoms without a"
+            " chokepoint, and abandoned attempts. Attempts another process is"
+            " still recording are listed and are not problems. Exits 0 when"
+            " intact and 2 with an explicit problem list otherwise."
         ),
     )
     verify_parser.add_argument(
@@ -278,6 +299,49 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     verify_parser.add_argument(
         "--json", action="store_true", help="print a JSON report including the problems list"
+    )
+
+    attempts_parser = subparsers.add_parser(
+        "attempts",
+        help="list unfinished attempts oldest first",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Lists attempts that have started and are not yet finalized. An"
+            " attempt is running while a live process is recording it and"
+            " abandoned once that process has stopped. Never includes commands"
+            " or log contents."
+        ),
+    )
+    attempts_parser.add_argument(
+        "--root",
+        default=None,
+        metavar="PATH",
+        help="project root directory (default: current directory)",
+    )
+    attempts_parser.add_argument(
+        "--json", action="store_true", help="print machine-readable JSON instead of text"
+    )
+
+    recover_parser = subparsers.add_parser(
+        "recover",
+        help="close attempts whose recording process stopped",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Closes every abandoned attempt. One with no recorded outcome"
+            " becomes an abandoned atom with a terminal chokepoint: its captured"
+            " output is retained, and its outcome, finish time, and duration"
+            " stay unknown. Running attempts are left alone. Run this only"
+            " after the abandoned command itself has stopped."
+        ),
+    )
+    recover_parser.add_argument(
+        "--root",
+        default=None,
+        metavar="PATH",
+        help="project root directory (default: current directory)",
+    )
+    recover_parser.add_argument(
+        "--json", action="store_true", help="print machine-readable JSON instead of text"
     )
 
     demo_parser = subparsers.add_parser(
@@ -320,6 +384,10 @@ def _dispatch(args: argparse.Namespace, command_tail: list[str]) -> int:
         return _compare(args)
     if name == "verify":
         return _verify(args)
+    if name == "attempts":
+        return _attempts(args)
+    if name == "recover":
+        return _recover(args)
     if name == "demo":
         return _demo(args)
     raise StoreError(f"unknown command: {name}")
@@ -385,6 +453,8 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
         argv=list(command_tail),
         declared_parameters=declared,
         mirror=mirror,
+        capture=not args.no_capture,
+        masked_arguments=args.mask_arg,
     )
     atom = execution.atom
     if args.json:
@@ -397,6 +467,7 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
                 "duration_seconds": atom.duration_seconds,
                 "return_code": atom.return_code,
                 "launch_error_category": atom.launch_error_category,
+                "output_capture": atom.output_capture.value,
                 "stdout_log": atom.stdout_log,
                 "stderr_log": atom.stderr_log,
             }
@@ -417,8 +488,11 @@ def _print_run(execution: runner.RunExecution) -> None:
     print(f"pathway: {atom.pathway_id}")
     print(f"outcome: {atom.outcome.value}")
     print(f"duration: {atom.duration_seconds:.6f}s")
-    print(f"stdout log: {atom.stdout_log}")
-    print(f"stderr log: {atom.stderr_log}")
+    if atom.output_capture is model.OutputCapture.FULL:
+        print(f"stdout log: {atom.stdout_log}")
+        print(f"stderr log: {atom.stderr_log}")
+    else:
+        print("output: not captured")
     if atom.return_code is not None:
         print(f"return code: {atom.return_code}")
     if atom.launch_error_category is not None:
@@ -547,6 +621,8 @@ def _compare(args: argparse.Namespace) -> int:
 def _run_phrase(summary: model.RunSummary | None) -> str:
     if summary is None:
         return "missing evidence"
+    if summary.duration_seconds is None:
+        return f"{summary.outcome.value} (duration unknown)"
     return f"{summary.outcome.value} {summary.duration_seconds:.6f}s"
 
 
@@ -566,6 +642,10 @@ def _verify(args: argparse.Namespace) -> int:
                     "chokepoints": report.chokepoints,
                     "logs_checked": report.logs_checked,
                 },
+                "attempts": {
+                    "running": list(report.running_attempts),
+                    "abandoned": list(report.abandoned_attempts),
+                },
                 "problems": [
                     {"record": record, "problem": problem} for record, problem in report.problems
                 ],
@@ -577,10 +657,65 @@ def _verify(args: argparse.Namespace) -> int:
         f"verified: {report.pathways} pathways, {report.atoms} atoms,"
         f" {report.chokepoints} chokepoints, {report.logs_checked} logs"
     )
+    if report.running_attempts:
+        print(f"running attempts: {len(report.running_attempts)}")
     for record, problem in report.problems:
         print(f"problem: {record}: {problem}")
     print(f"integrity: {status}")
     return EXIT_OK if report.ok else EXIT_INVALID
+
+
+def _attempts(args: argparse.Namespace) -> int:
+    state = _open_store(args.root)
+    attempts = state.list_attempts()
+    if args.json:
+        _emit_json(
+            {
+                "attempts": [
+                    {
+                        "id": attempt.id,
+                        "pathway_id": attempt.pathway_id,
+                        "started_at": attempt.started_at,
+                        "state": attempt_state.value,
+                    }
+                    for attempt, attempt_state in attempts
+                ]
+            }
+        )
+        return EXIT_OK
+    for attempt, attempt_state in attempts:
+        print(
+            f"{attempt.started_at}  {attempt.id}  pathway={attempt.pathway_id}"
+            f"  state={attempt_state.value}"
+        )
+    return EXIT_OK
+
+
+def _recover(args: argparse.Namespace) -> int:
+    state = _open_store(args.root)
+    recovered = state.recover()
+    if args.json:
+        _emit_json(
+            {
+                "recovered": [
+                    {
+                        "atom_id": item.atom_id,
+                        "chokepoint_id": item.chokepoint_id,
+                        "pathway_id": item.pathway_id,
+                        "action": item.action.value,
+                    }
+                    for item in recovered
+                ]
+            }
+        )
+        return EXIT_OK
+    for item in recovered:
+        print(
+            f"{item.action.value}: atom {item.atom_id}  chokepoint {item.chokepoint_id}"
+            f"  pathway={item.pathway_id}"
+        )
+    print(f"recovered: {len(recovered)}")
+    return EXIT_OK
 
 
 def _demo(args: argparse.Namespace) -> int:

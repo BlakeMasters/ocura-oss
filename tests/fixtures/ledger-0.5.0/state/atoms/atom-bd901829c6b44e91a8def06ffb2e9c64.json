@@ -1,0 +1,35 @@
+{
+  "schema_version": 2,
+  "kind": "atom",
+  "payload": {
+    "id": "atom-bd901829c6b44e91a8def06ffb2e9c64",
+    "pathway_id": "pathway-1ac386d75d104e4abb977fd43ea0bb55",
+    "started_at": "2026-10-07T23:31:45.506345+00:00",
+    "finished_at": null,
+    "duration_seconds": null,
+    "outcome": "abandoned",
+    "return_code": null,
+    "launch_error_category": null,
+    "declared_parameters": {
+      "batch": "4"
+    },
+    "command": [
+      "python",
+      "train.py",
+      "--batch",
+      "4"
+    ],
+    "masked_arguments": [],
+    "output_capture": "full",
+    "stdout_log": ".ocura-oss/logs/atom-bd901829c6b44e91a8def06ffb2e9c64.stdout.log",
+    "stderr_log": ".ocura-oss/logs/atom-bd901829c6b44e91a8def06ffb2e9c64.stderr.log",
+    "stdout_bytes": 8,
+    "stderr_bytes": 0,
+    "stdout_sha256": "95aebb28195b8d737effe0df18d71d39c8d8ba6569286fd3930fbc9f9767181e",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "ab7d13e8bdf85b5084f42d21363122f37de21d606c48dea3322a299e227b9572"
+  }
+}

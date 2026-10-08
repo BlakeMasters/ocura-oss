@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,7 +14,7 @@ from ocura_oss.demo import DemoReport
 from ocura_oss.demo import run_demo as _run_demo
 from ocura_oss.model import ComparisonResult, Den, Pathway
 from ocura_oss.runner import RunExecution
-from ocura_oss.store import StateVerification, Store
+from ocura_oss.store import RecoveredAttempt, StateVerification, Store
 
 _Root = os.PathLike[str] | str | None
 
@@ -46,12 +46,19 @@ def run(
     pathway_id: str | None = None,
     parameters: Mapping[str, str] | None = None,
     mirror: bool = False,
+    capture: bool = True,
+    masked_arguments: Iterable[int] = (),
 ) -> RunExecution:
     """Run a trusted local command and record terminal evidence.
 
     The den's default pathway is used when *pathway_id* is omitted. A command
     failure is represented by the returned atom's outcome and does not raise
     an exception. Invalid state or input raises :class:`StoreError`.
+
+    Pass ``capture=False`` to retain no stdout or stderr; the atom then records
+    that it has no logs. *masked_arguments* lists zero-based positions in
+    *command* whose values are replaced by a placeholder in every record. The
+    command still receives the real values.
     """
     store = _required_store(root)
     selected_pathway = pathway_id or store.load_den().default_pathway_id
@@ -61,6 +68,8 @@ def run(
         argv=command,
         declared_parameters={} if parameters is None else parameters,
         mirror=mirror,
+        capture=capture,
+        masked_arguments=masked_arguments,
     )
 
 
@@ -99,6 +108,15 @@ def compare(source_chokepoint_id: str | None = None, *, root: _Root = None) -> C
 def verify(root: _Root = None) -> StateVerification:
     """Recheck every state record and every log referenced by a recorded run."""
     return _required_store(root).verify_state()
+
+
+def recover(root: _Root = None) -> tuple[RecoveredAttempt, ...]:
+    """Close every attempt whose recording process stopped before finalizing it.
+
+    An attempt with no recorded outcome becomes an ``abandoned`` atom. Attempts
+    that a live process is still recording are left alone.
+    """
+    return _required_store(root).recover()
 
 
 def run_demo(root: os.PathLike[str] | str) -> DemoReport:

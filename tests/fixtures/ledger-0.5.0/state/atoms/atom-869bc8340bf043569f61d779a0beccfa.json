@@ -1,0 +1,38 @@
+{
+  "schema_version": 2,
+  "kind": "atom",
+  "payload": {
+    "id": "atom-869bc8340bf043569f61d779a0beccfa",
+    "pathway_id": "pathway-1ac386d75d104e4abb977fd43ea0bb55",
+    "started_at": "2026-10-07T23:31:45.532967+00:00",
+    "finished_at": "2026-10-07T23:31:45.587177+00:00",
+    "duration_seconds": 0.052091,
+    "outcome": "passed",
+    "return_code": 0,
+    "launch_error_category": null,
+    "declared_parameters": {
+      "batch": "4"
+    },
+    "command": [
+      "python",
+      "-c",
+      "pass",
+      "--token",
+      "<masked>"
+    ],
+    "masked_arguments": [
+      4
+    ],
+    "output_capture": "none",
+    "stdout_log": null,
+    "stderr_log": null,
+    "stdout_bytes": null,
+    "stderr_bytes": null,
+    "stdout_sha256": null,
+    "stderr_sha256": null
+  },
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "5181b1c650c1050001e2077f4e33ad8ea56c602938177905e05f7fe8e4c3ebc0"
+  }
+}

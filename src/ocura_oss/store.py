@@ -5,38 +5,60 @@
 from __future__ import annotations
 
 import contextlib
+import datetime
 import hashlib
 import json
 import os
 import tempfile
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal, TypeVar
 
-from ocura_oss import model
+from ocura_oss import locking, model
 
 STATE_DIR_NAME = ".ocura-oss"
 
 _ENVELOPE_KEYS = {"schema_version", "kind", "payload", "checksum"}
 _HASH_CHUNK = 1024 * 1024
+_REMOVE_RETRIES = 200
+_REMOVE_DELAY = 0.01
 
 _T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
 class StateVerification:
-    """Result of verifying every record and log under a state directory."""
+    """Result of verifying every record and log under a state directory.
+
+    ``running_attempts`` names attempts another live process is still
+    recording; they are not problems. ``abandoned_attempts`` names attempts
+    whose recording process stopped first; each also appears in ``problems``
+    until :meth:`Store.recover` closes it.
+    """
 
     pathways: int
     atoms: int
     chokepoints: int
     logs_checked: int
     problems: tuple[tuple[str, str], ...]
+    running_attempts: tuple[str, ...] = ()
+    abandoned_attempts: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
         return not self.problems
+
+
+@dataclass(frozen=True)
+class RecoveredAttempt:
+    """One unfinished attempt closed by :meth:`Store.recover`."""
+
+    atom_id: str
+    chokepoint_id: str
+    pathway_id: str
+    action: model.RecoveryAction
 
 
 class StoreError(Exception):
@@ -52,9 +74,9 @@ def resolve_root(root: os.PathLike[str] | str | None = None) -> Path:
 class Store:
     """Read and verify Ocura OSS state under one project root.
 
-    The documented loading, listing, initialization, and verification methods
-    form the provisional low-level API. Record writing remains internal to the
-    package workflows.
+    The documented loading, listing, initialization, verification, and
+    recovery methods form the provisional low-level API. Record writing
+    remains internal to the package workflows.
     """
 
     def __init__(self, root: os.PathLike[str] | str | None = None) -> None:
@@ -63,6 +85,7 @@ class Store:
         self.pathways_dir = self.state_dir / "pathways"
         self.atoms_dir = self.state_dir / "atoms"
         self.chokepoints_dir = self.state_dir / "chokepoints"
+        self.attempts_dir = self.state_dir / "attempts"
         self.logs_dir = self.state_dir / "logs"
         self.den_path = self.state_dir / "den.json"
 
@@ -162,6 +185,156 @@ class Store:
         path = self._record_path(self.chokepoints_dir, chokepoint.id, "chokepoint")
         self._write_record(path, "chokepoint", model.chokepoint_to_payload(chokepoint))
 
+    def _attempt_path(self, attempt_id: str) -> Path:
+        return self._record_path(self.attempts_dir, attempt_id, "atom")
+
+    def _attempt_lock(self, attempt_id: str) -> Path:
+        return self._attempt_path(attempt_id).with_suffix(".lock")
+
+    @contextlib.contextmanager
+    def _recording(self, attempt: model.Attempt) -> Iterator[None]:
+        """Journal an attempt for as long as this process is recording it.
+
+        The lock is taken before the record is written and outlives it, so a
+        reader that finds the record unlocked knows its recorder is gone.
+        """
+        self.attempts_dir.mkdir(parents=True, exist_ok=True)
+        with locking.hold(self._attempt_lock(attempt.id)):
+            self._write_record(
+                self._attempt_path(attempt.id), "attempt", model.attempt_to_payload(attempt)
+            )
+            yield
+
+    def _remove_attempt(self, attempt_id: str) -> None:
+        _remove_file(self._attempt_path(attempt_id))
+
+    def list_attempts(self) -> list[tuple[model.Attempt, model.AttemptState]]:
+        """Return unfinished attempts with their state, in start order.
+
+        An attempt is ``running`` while a live process is recording it and
+        ``abandoned`` once that process has stopped without finalizing it.
+        Finalized attempts are atoms and are not listed.
+        """
+        # Reading the den first rejects state this version cannot read, even
+        # when no attempt record is present to reveal it.
+        self.load_den()
+        problems: list[tuple[str, str]] = []
+        attempts = self._scan_attempts(problems)
+        if problems:
+            record, problem = problems[0]
+            raise StoreError(f"{record}: {problem}")
+        attempts.sort(key=lambda item: (item[0].started_at, item[0].id))
+        return attempts
+
+    def recover(
+        self, *, now: Callable[[], datetime.datetime] | None = None
+    ) -> tuple[RecoveredAttempt, ...]:
+        """Close every unfinished attempt whose recording process has stopped.
+
+        An attempt with no recorded outcome becomes an ``abandoned`` atom with
+        a terminal chokepoint; whatever output it had captured is measured and
+        retained. Its outcome, finish time, and duration are not known and are
+        not invented. An attempt whose atom was already written only has its
+        missing chokepoint completed or its leftover journal entry cleared.
+        Attempts another live process is still recording are left alone.
+
+        Recover only after the command itself has stopped: a command that
+        outlived its recorder can keep writing to logs measured here.
+        """
+        self.require()
+        self.load_den()
+        clock = now or model.utc_now
+        recovered: list[RecoveredAttempt] = []
+        if not self.attempts_dir.is_dir():
+            return ()
+        for path in sorted(self.attempts_dir.glob("*.json")):
+            with locking.try_hold(path.with_suffix(".lock")) as held:
+                if not held or not path.exists():
+                    continue
+                attempt = self._load_listed(path, "attempt", model.attempt_from_payload)
+                recovered.append(self._close_attempt(attempt, clock))
+        for lock in sorted(self.attempts_dir.glob("*.lock")):
+            if not lock.with_suffix(".json").exists():
+                # Holding a lock file removes it on release; one still held
+                # belongs to a run that has not written its record yet.
+                with locking.try_hold(lock):
+                    pass
+        return tuple(recovered)
+
+    def _close_attempt(
+        self, attempt: model.Attempt, clock: Callable[[], datetime.datetime]
+    ) -> RecoveredAttempt:
+        atom_path = self._record_path(self.atoms_dir, attempt.id, "atom")
+        chokepoint_path = self._record_path(
+            self.chokepoints_dir, attempt.chokepoint_id, "chokepoint"
+        )
+        if atom_path.is_file():
+            atom = self.load_atom(attempt.id)
+            action = (
+                model.RecoveryAction.CLEARED
+                if chokepoint_path.is_file()
+                else model.RecoveryAction.COMPLETED
+            )
+            created_at = atom.finished_at or model.format_timestamp(clock())
+        else:
+            atom = self._abandoned_atom(attempt)
+            self._save_atom(atom)
+            action = model.RecoveryAction.ABANDONED
+            created_at = model.format_timestamp(clock())
+        if not chokepoint_path.is_file():
+            self._save_chokepoint(
+                model.Chokepoint(
+                    id=attempt.chokepoint_id,
+                    pathway_id=atom.pathway_id,
+                    atom_id=atom.id,
+                    created_at=created_at,
+                    kind=model.TERMINAL_KIND,
+                    outcome=atom.outcome,
+                    branchable=True,
+                )
+            )
+        self._remove_attempt(attempt.id)
+        return RecoveredAttempt(
+            atom_id=atom.id,
+            chokepoint_id=attempt.chokepoint_id,
+            pathway_id=atom.pathway_id,
+            action=action,
+        )
+
+    def _abandoned_atom(self, attempt: model.Attempt) -> model.Atom:
+        measured: list[tuple[int, str]] = []
+        for relative in (attempt.stdout_log, attempt.stderr_log):
+            if relative is None:
+                continue
+            path = self._evidence_path(attempt.id, relative)
+            try:
+                # A recorder stopped before opening a log captured nothing.
+                open(path, "ab").close()
+                measured.append(size_and_sha256(path))
+            except OSError as exc:
+                raise StoreError(f"attempt {attempt.id} log is unreadable: {relative}") from exc
+        captured = len(measured) == 2
+        return model.Atom(
+            id=attempt.id,
+            pathway_id=attempt.pathway_id,
+            started_at=attempt.started_at,
+            finished_at=None,
+            duration_seconds=None,
+            outcome=model.Outcome.ABANDONED,
+            return_code=None,
+            launch_error_category=None,
+            declared_parameters=attempt.declared_parameters,
+            command=attempt.command,
+            stdout_log=attempt.stdout_log,
+            stderr_log=attempt.stderr_log,
+            stdout_bytes=measured[0][0] if captured else None,
+            stderr_bytes=measured[1][0] if captured else None,
+            stdout_sha256=measured[0][1] if captured else None,
+            stderr_sha256=measured[1][1] if captured else None,
+            output_capture=attempt.output_capture,
+            masked_arguments=attempt.masked_arguments,
+        )
+
     def list_pathways(self) -> list[model.Pathway]:
         """Return validated pathways in creation order."""
         records = self._list_typed(self.pathways_dir, "pathway", model.pathway_from_payload)
@@ -191,12 +364,10 @@ class Store:
 
         Each log must stay directly inside ``.ocura-oss/logs/``, exist on disk,
         and match the recorded byte count and SHA-256 digest. Raises
-        StoreError on the first failing log.
+        StoreError on the first failing log. An atom recorded without output
+        capture has no logs to verify.
         """
-        for relative, recorded_size, recorded_digest in (
-            (atom.stdout_log, atom.stdout_bytes, atom.stdout_sha256),
-            (atom.stderr_log, atom.stderr_bytes, atom.stderr_sha256),
-        ):
+        for relative, recorded_size, recorded_digest in _recorded_logs(atom):
             self._verify_log(atom.id, relative, recorded_size, recorded_digest)
 
     def resolve_log_path(self, atom: model.Atom, stream: Literal["stdout", "stderr"]) -> Path:
@@ -205,14 +376,9 @@ class Store:
         Call :meth:`verify_atom_evidence` first when the log's recorded size and
         digest must also be checked. Use :meth:`read_verified_log` to consume
         bytes whose size and digest are checked as part of the same read.
+        Raises StoreError for an atom recorded without output capture.
         """
-        if stream == "stdout":
-            relative = atom.stdout_log
-        elif stream == "stderr":
-            relative = atom.stderr_log
-        else:
-            raise StoreError("log stream must be 'stdout' or 'stderr'")
-        return self._evidence_path(atom.id, relative)
+        return self._evidence_path(atom.id, _recorded_log(atom, stream)[0])
 
     def read_verified_log(
         self, atom_id: str, *, stream: Literal["stdout", "stderr"] = "stdout"
@@ -223,15 +389,11 @@ class Store:
         log's containment, byte count, and SHA-256 digest. Missing, unreadable, or
         inconsistent evidence raises StoreError. The other log and the rest of
         the ledger are not verified. The complete log is held in memory; decoding
-        and interpretation are left to the caller.
+        and interpretation are left to the caller. An atom recorded without
+        output capture has no log to read and raises StoreError.
         """
         atom = self.load_atom(atom_id)
-        if stream == "stdout":
-            relative, size, digest = atom.stdout_log, atom.stdout_bytes, atom.stdout_sha256
-        elif stream == "stderr":
-            relative, size, digest = atom.stderr_log, atom.stderr_bytes, atom.stderr_sha256
-        else:
-            raise StoreError("log stream must be 'stdout' or 'stderr'")
+        relative, size, digest = _recorded_log(atom, stream)
         try:
             path = self.resolve_log_path(atom, stream)
             if not path.is_file():
@@ -268,14 +430,25 @@ class Store:
     def verify_state(self) -> StateVerification:
         """Verify every state record and every log referenced by a valid atom.
 
-        Also reports files under ``.ocura-oss/logs/`` that no atom record
-        references. Returns a report whose ``problems`` list is empty when the
-        state is fully intact; ``logs_checked`` counts the individual logs that
-        actually passed verification. A missing or unreadable den raises
-        StoreError, because nothing can be verified without it.
+        Also reports files under ``.ocura-oss/logs/`` that no record references,
+        atoms without exactly one terminal chokepoint, and abandoned attempts.
+        Returns a report whose ``problems`` list is empty when the state is
+        fully intact; ``logs_checked`` counts the individual logs that actually
+        passed verification. A missing or unreadable den raises StoreError,
+        because nothing can be verified without it.
+
+        Other processes may record runs under the same root while this runs.
+        An attempt a live process is still recording is reported in
+        ``running_attempts`` and is not a problem; its logs are not checked
+        until it is finalized.
         """
         den = self.load_den()
         problems: list[tuple[str, str]] = []
+        # A run writes its attempt before its logs and its atom before its
+        # chokepoint, and removes the attempt last. Reading in that same order
+        # never mistakes a run in progress for damage.
+        log_entries = sorted(self.logs_dir.iterdir()) if self.logs_dir.is_dir() else []
+        attempts = self._scan_attempts(problems)
         pathways = self._scan_records(
             self.pathways_dir, "pathway", model.pathway_from_payload, problems
         )
@@ -290,27 +463,45 @@ class Store:
                 problems.append((f"{pathway.id}.json", str(exc)))
         logs_checked = 0
         referenced_logs: set[Path] = set()
+        running: list[str] = []
+        abandoned: list[str] = []
+        for attempt, state in attempts:
+            label = f"attempts/{attempt.id}.json"
+            if state is model.AttemptState.RUNNING:
+                running.append(attempt.id)
+            else:
+                abandoned.append(attempt.id)
+                problems.append(
+                    (label, "attempt was not finalized; run `ocura-oss recover` to close it")
+                )
+            for relative in (attempt.stdout_log, attempt.stderr_log):
+                if relative is None:
+                    continue
+                try:
+                    referenced_logs.add(self._evidence_path(attempt.id, relative))
+                except StoreError as exc:
+                    problems.append((label, str(exc)))
         for atom in atoms:
             try:
                 self.load_atom(atom.id)
             except StoreError as exc:
                 problems.append((f"{atom.id}.json", str(exc)))
-            for relative, size_field, digest_field in (
-                (atom.stdout_log, atom.stdout_bytes, atom.stdout_sha256),
-                (atom.stderr_log, atom.stderr_bytes, atom.stderr_sha256),
-            ):
+            for relative, size_field, digest_field in _recorded_logs(atom):
                 try:
                     referenced_logs.add(self._evidence_path(atom.id, relative))
                     self._verify_log(atom.id, relative, size_field, digest_field)
                     logs_checked += 1
                 except StoreError as exc:
                     problems.append((f"{atom.id}.json", str(exc)))
-        self._scan_orphaned_logs(referenced_logs, problems)
+        self._report_orphaned_logs(log_entries, referenced_logs, problems)
         for chokepoint in chokepoints:
             try:
                 self.load_chokepoint(chokepoint.id)
             except StoreError as exc:
                 problems.append((f"{chokepoint.id}.json", str(exc)))
+        self._report_missing_chokepoints(
+            atoms, chokepoints, {attempt.id for attempt, _state in attempts}, problems
+        )
         if all(item.id != den.default_pathway_id for item in pathways):
             problems.append(("den.json", "default pathway record is missing"))
         return StateVerification(
@@ -319,6 +510,8 @@ class Store:
             chokepoints=len(chokepoints),
             logs_checked=logs_checked,
             problems=tuple(problems),
+            running_attempts=tuple(running),
+            abandoned_attempts=tuple(abandoned),
         )
 
     def initialize_state(
@@ -347,14 +540,22 @@ class Store:
             reason="default pathway",
             parameters={},
         )
+        try:
+            # Creating the directory is the claim: of two racing initializers,
+            # exactly one succeeds.
+            self.state_dir.mkdir(parents=True)
+        except FileExistsError:
+            raise StoreError(
+                f"cannot initialize: state directory already exists: {self.state_dir}"
+            ) from None
         for directory in (
-            self.state_dir,
             self.pathways_dir,
             self.atoms_dir,
             self.chokepoints_dir,
+            self.attempts_dir,
             self.logs_dir,
         ):
-            directory.mkdir(parents=True, exist_ok=True)
+            directory.mkdir()
         self._save_den(den)
         self._save_pathway(pathway)
         return den, pathway
@@ -401,8 +602,16 @@ class Store:
         if isinstance(schema_version, bool) or not isinstance(schema_version, int):
             raise StoreError(f"malformed {expected_kind} record {path.name}: bad schema version")
         if schema_version != model.SCHEMA_VERSION:
+            hint = (
+                "; Ocura OSS 0.4 and earlier wrote this state, and this version cannot"
+                ' read or convert it. Keep using "ocura-oss<0.5" for it, or move'
+                f" {STATE_DIR_NAME} aside and run `ocura-oss init`"
+                if schema_version == 1
+                else ""
+            )
             raise StoreError(
-                f"unsupported schema version {schema_version} in {expected_kind} record {path.name}"
+                f"unsupported schema version {schema_version} in {expected_kind} record"
+                f" {path.name}{hint}"
             )
         if data["kind"] != expected_kind:
             raise StoreError(
@@ -473,13 +682,37 @@ class Store:
                 problems.append((path.name, str(exc)))
         return records
 
-    def _scan_orphaned_logs(
-        self, referenced_logs: set[Path], problems: list[tuple[str, str]]
+    def _scan_attempts(
+        self, problems: list[tuple[str, str]]
+    ) -> list[tuple[model.Attempt, model.AttemptState]]:
+        """Collect unfinished attempts and whether each is still being recorded."""
+        attempts: list[tuple[model.Attempt, model.AttemptState]] = []
+        if not self.attempts_dir.is_dir():
+            return attempts
+        for path in sorted(self.attempts_dir.glob("*.json")):
+            try:
+                attempt = self._load_listed(path, "attempt", model.attempt_from_payload)
+            except StoreError as exc:
+                # A record that vanished was finalized while it was being read.
+                if path.exists():
+                    problems.append((f"attempts/{path.name}", str(exc)))
+                continue
+            if locking.is_held(self._attempt_lock(attempt.id)):
+                attempts.append((attempt, model.AttemptState.RUNNING))
+            elif path.exists():
+                # The record is removed before its lock is released, so an
+                # unlocked record that still exists was left by a dead recorder.
+                attempts.append((attempt, model.AttemptState.ABANDONED))
+        return attempts
+
+    def _report_orphaned_logs(
+        self,
+        log_entries: list[Path],
+        referenced_logs: set[Path],
+        problems: list[tuple[str, str]],
     ) -> None:
-        """Report files under the logs directory that no atom record references."""
-        if not self.logs_dir.is_dir():
-            return
-        for entry in sorted(self.logs_dir.iterdir()):
+        """Report entries under the logs directory that no record references."""
+        for entry in log_entries:
             if entry.resolve() in referenced_logs:
                 continue
             if entry.is_dir():
@@ -491,6 +724,40 @@ class Store:
                         "orphaned file: no atom record references this log",
                     )
                 )
+
+    def _report_missing_chokepoints(
+        self,
+        atoms: list[model.Atom],
+        chokepoints: list[model.Chokepoint],
+        attempt_ids: set[str],
+        problems: list[tuple[str, str]],
+    ) -> None:
+        """Report atoms that do not have exactly one terminal chokepoint."""
+        counts: dict[str, int] = {}
+        for chokepoint in chokepoints:
+            counts[chokepoint.atom_id] = counts.get(chokepoint.atom_id, 0) + 1
+        missing: list[model.Atom] = []
+        for atom in atoms:
+            count = counts.get(atom.id, 0)
+            if count > 1:
+                problems.append((f"{atom.id}.json", f"atom has {count} chokepoints"))
+            elif count == 0 and atom.id not in attempt_ids:
+                missing.append(atom)
+        # A run that began after the attempts were listed may sit between its
+        # atom and its chokepoint. Its attempt record is removed only once the
+        # chokepoint exists, so check the record first and the chokepoints after.
+        missing = [atom for atom in missing if not self._attempt_path(atom.id).exists()]
+        if not missing:
+            return
+        current = {
+            chokepoint.atom_id
+            for chokepoint in self._scan_records(
+                self.chokepoints_dir, "chokepoint", model.chokepoint_from_payload, []
+            )
+        }
+        for atom in missing:
+            if atom.id not in current:
+                problems.append((f"{atom.id}.json", "atom has no terminal chokepoint"))
 
     def _evidence_path(self, atom_id: str, relative: str) -> Path:
         """Resolve a recorded log path; reject paths outside the logs dir."""
@@ -507,12 +774,54 @@ class Store:
         return candidate
 
 
-def sha256_of_file(path: Path) -> str:
+def size_and_sha256(path: Path) -> tuple[int, str]:
     digest = hashlib.sha256()
+    size = 0
     with open(path, "rb") as stream:
         while chunk := stream.read(_HASH_CHUNK):
+            size += len(chunk)
             digest.update(chunk)
-    return digest.hexdigest()
+    return size, digest.hexdigest()
+
+
+def sha256_of_file(path: Path) -> str:
+    return size_and_sha256(path)[1]
+
+
+def _recorded_logs(atom: model.Atom) -> list[tuple[str, int, str]]:
+    """Return ``(path, bytes, sha256)`` for each log an atom recorded."""
+    logs: list[tuple[str, int, str]] = []
+    for relative, size, digest in (
+        (atom.stdout_log, atom.stdout_bytes, atom.stdout_sha256),
+        (atom.stderr_log, atom.stderr_bytes, atom.stderr_sha256),
+    ):
+        if relative is not None and size is not None and digest is not None:
+            logs.append((relative, size, digest))
+    return logs
+
+
+def _recorded_log(atom: model.Atom, stream: str) -> tuple[str, int, str]:
+    if stream not in ("stdout", "stderr"):
+        raise StoreError("log stream must be 'stdout' or 'stderr'")
+    logs = _recorded_logs(atom)
+    if len(logs) != 2:
+        raise StoreError(f"atom {atom.id} was recorded without output capture")
+    return logs[0] if stream == "stdout" else logs[1]
+
+
+def _remove_file(path: Path) -> None:
+    """Remove a file that a concurrent reader may briefly hold open.
+
+    Windows refuses to remove an open file, so a reader verifying the state
+    at that instant would otherwise make the removal fail.
+    """
+    for _ in range(_REMOVE_RETRIES):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            time.sleep(_REMOVE_DELAY)
+    path.unlink(missing_ok=True)
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:

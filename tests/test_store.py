@@ -33,7 +33,7 @@ class InitializationTests(unittest.TestCase):
         with temp_root() as root:
             store = new_store(root)
             self.assertTrue((store.state_dir / "den.json").is_file())
-            for sub in ("pathways", "atoms", "chokepoints", "logs"):
+            for sub in ("pathways", "atoms", "chokepoints", "attempts", "logs"):
                 self.assertTrue((store.state_dir / sub).is_dir())
 
             den = store.load_den()
@@ -52,9 +52,9 @@ class InitializationTests(unittest.TestCase):
             self.assertTrue(model.is_valid_id(pathway.id, "pathway"))
 
             envelope = json.loads((store.state_dir / "den.json").read_text("utf-8"))
-            self.assertEqual(envelope["schema_version"], 1)
+            self.assertEqual(envelope["schema_version"], 2)
             self.assertEqual(envelope["kind"], "den")
-            expected = model.checksum_for(1, "den", envelope["payload"])["value"]
+            expected = model.checksum_for(2, "den", envelope["payload"])["value"]
             self.assertEqual(envelope["checksum"]["algorithm"], "sha256")
             self.assertEqual(envelope["checksum"]["value"], expected)
 
@@ -118,7 +118,7 @@ class ReadValidationTests(unittest.TestCase):
             store = new_store(root)
             den_path = store.state_dir / "den.json"
             envelope = json.loads(den_path.read_text("utf-8"))
-            self._rewrite(den_path, 1, "atom", envelope["payload"])
+            self._rewrite(den_path, model.SCHEMA_VERSION, "atom", envelope["payload"])
             with self.assertRaises(StoreError):
                 store.load_den()
 
@@ -127,9 +127,42 @@ class ReadValidationTests(unittest.TestCase):
             store = new_store(root)
             den_path = store.state_dir / "den.json"
             envelope = json.loads(den_path.read_text("utf-8"))
-            self._rewrite(den_path, 2, "den", envelope["payload"])
-            with self.assertRaises(StoreError):
+            for version in (1, 3):
+                with self.subTest(version=version):
+                    self._rewrite(den_path, version, "den", envelope["payload"])
+                    with self.assertRaises(StoreError) as ctx:
+                        store.load_den()
+                    self.assertIn(f"unsupported schema version {version}", str(ctx.exception))
+
+    def test_schema_one_rejection_names_the_writing_versions(self):
+        with temp_root() as root:
+            store = new_store(root)
+            den_path = store.state_dir / "den.json"
+            envelope = json.loads(den_path.read_text("utf-8"))
+            self._rewrite(den_path, 1, "den", envelope["payload"])
+            with self.assertRaises(StoreError) as ctx:
                 store.load_den()
+            message = str(ctx.exception)
+            self.assertIn("Ocura OSS 0.4 and earlier wrote this state", message)
+            self.assertIn('Keep using "ocura-oss<0.5" for it', message)
+            self.assertIn("move .ocura-oss aside and run `ocura-oss init`", message)
+
+    def test_every_entry_point_rejects_state_from_an_earlier_schema(self):
+        with temp_root() as root:
+            store = new_store(root)
+            den_path = store.state_dir / "den.json"
+            envelope = json.loads(den_path.read_text("utf-8"))
+            self._rewrite(den_path, 1, "den", envelope["payload"])
+            for operation in (
+                store.load_den,
+                store.verify_state,
+                store.list_attempts,
+                store.recover,
+                lambda: store.load_pathway(envelope["payload"]["default_pathway_id"]),
+            ):
+                with self.subTest(operation=operation), self.assertRaises(StoreError) as ctx:
+                    operation()
+                self.assertIn("unsupported schema version 1", str(ctx.exception))
 
     def test_missing_required_field_is_rejected(self):
         with temp_root() as root:
@@ -137,7 +170,7 @@ class ReadValidationTests(unittest.TestCase):
             den_path = store.state_dir / "den.json"
             envelope = json.loads(den_path.read_text("utf-8"))
             del envelope["payload"]["default_pathway_id"]
-            self._rewrite(den_path, 1, "den", envelope["payload"])
+            self._rewrite(den_path, model.SCHEMA_VERSION, "den", envelope["payload"])
             with self.assertRaises(StoreError):
                 store.load_den()
 
@@ -225,6 +258,8 @@ class PayloadValidationTests(unittest.TestCase):
             "launch_error_category": None,
             "declared_parameters": {},
             "command": ["x"],
+            "masked_arguments": [],
+            "output_capture": "full",
             "stdout_log": ".ocura-oss/logs/x.stdout.log",
             "stderr_log": ".ocura-oss/logs/x.stderr.log",
             "stdout_bytes": 0,
@@ -235,11 +270,11 @@ class PayloadValidationTests(unittest.TestCase):
 
     def _write_atom_payload(self, payload):
         path = self.store.atoms_dir / f"{payload['id']}.json"
-        checksum = model.checksum_for(1, "atom", payload)
+        checksum = model.checksum_for(model.SCHEMA_VERSION, "atom", payload)
         path.write_text(
             json.dumps(
                 {
-                    "schema_version": 1,
+                    "schema_version": model.SCHEMA_VERSION,
                     "kind": "atom",
                     "payload": payload,
                     "checksum": checksum,
@@ -254,9 +289,6 @@ class PayloadValidationTests(unittest.TestCase):
 
         missing = copy.deepcopy(base)
         del missing["command"]
-
-        extra = copy.deepcopy(base)
-        extra["surprise"] = 1
 
         wrong_prefix = copy.deepcopy(base)
         wrong_prefix["id"] = model.make_id("den")
@@ -303,7 +335,6 @@ class PayloadValidationTests(unittest.TestCase):
 
         cases = [
             ("missing field", missing),
-            ("extra field", extra),
             ("wrong id prefix", wrong_prefix),
             ("invalid outcome", bad_outcome),
             ("launch_failed with code", incoherent_launch),
@@ -331,6 +362,79 @@ class PayloadValidationTests(unittest.TestCase):
         atom = self.store.load_atom(atom_id)
         self.assertEqual(atom.command, ("x",))
         self.assertEqual(atom.outcome, model.Outcome.PASSED)
+        self.assertIs(atom.output_capture, model.OutputCapture.FULL)
+        self.assertEqual(atom.masked_arguments, ())
+
+    def test_fields_added_by_a_newer_writer_are_ignored(self):
+        payload = self.valid_atom_payload(self.pathway_id)
+        payload["added_later"] = {"any": ["shape"]}
+        atom = self.store.load_atom(self._write_atom_payload(payload))
+        self.assertEqual(atom.command, ("x",))
+        self.assertFalse(hasattr(atom, "added_later"))
+
+    def test_uncaptured_and_masked_atom_payloads_round_trip(self):
+        payload = self.valid_atom_payload(self.pathway_id)
+        payload.update(
+            command=["tool", "<masked>", "--flag", "<masked>"],
+            masked_arguments=[1, 3],
+            output_capture="none",
+            stdout_log=None,
+            stderr_log=None,
+            stdout_bytes=None,
+            stderr_bytes=None,
+            stdout_sha256=None,
+            stderr_sha256=None,
+        )
+        atom = self.store.load_atom(self._write_atom_payload(payload))
+        self.assertIs(atom.output_capture, model.OutputCapture.NONE)
+        self.assertEqual(atom.masked_arguments, (1, 3))
+        self.assertIsNone(atom.stdout_log)
+        self.assertIsNone(atom.stderr_sha256)
+        self.store.verify_atom_evidence(atom)
+
+    def test_abandoned_atom_payload_round_trips(self):
+        payload = self.valid_atom_payload(self.pathway_id)
+        payload.update(
+            outcome="abandoned", return_code=None, finished_at=None, duration_seconds=None
+        )
+        atom = self.store.load_atom(self._write_atom_payload(payload))
+        self.assertIs(atom.outcome, model.Outcome.ABANDONED)
+        self.assertIsNone(atom.finished_at)
+        self.assertIsNone(atom.duration_seconds)
+
+    def test_incoherent_capture_masking_and_abandonment_are_rejected(self):
+        base = self.valid_atom_payload(self.pathway_id)
+
+        def variant(**changes):
+            payload = copy.deepcopy(base)
+            payload["id"] = model.make_id("atom")
+            payload.update(changes)
+            return payload
+
+        cases = [
+            ("unknown capture mode", variant(output_capture="partial")),
+            ("uncaptured with a log path", variant(output_capture="none")),
+            ("captured without a log path", variant(stdout_log=None)),
+            ("captured without a digest", variant(stderr_sha256=None)),
+            ("mask outside the command", variant(masked_arguments=[1])),
+            ("mask on an unmasked token", variant(masked_arguments=[0])),
+            ("masks out of order", variant(command=["<masked>"] * 2, masked_arguments=[1, 0])),
+            ("duplicate masks", variant(command=["<masked>"], masked_arguments=[0, 0])),
+            ("boolean mask", variant(command=["<masked>"], masked_arguments=[False])),
+            ("masks not a list", variant(masked_arguments=None)),
+            ("finished without a finish time", variant(finished_at=None)),
+            ("finished without a duration", variant(duration_seconds=None)),
+            ("abandoned with a finish time", variant(outcome="abandoned", return_code=None)),
+            (
+                "abandoned with a return code",
+                variant(outcome="abandoned", finished_at=None, duration_seconds=None),
+            ),
+        ]
+        for label, payload in cases:
+            with self.subTest(case=label):
+                atom_id = self._write_atom_payload(payload)
+                with self.assertRaises(StoreError):
+                    self.store.load_atom(atom_id)
 
 
 class FuzzReaderTests(unittest.TestCase):
@@ -349,7 +453,7 @@ class FuzzReaderTests(unittest.TestCase):
                 elif choice == 1:
                     mutated["extra"] = True
                 elif choice == 2:
-                    mutated["schema_version"] = rng.choice([2, True, "1", 1.0, None])
+                    mutated["schema_version"] = rng.choice([1, 3, True, "2", 2.0, None])
                 elif choice == 3:
                     mutated["kind"] = rng.choice(["atom", "", None, "DEN"])
                 elif choice == 4:

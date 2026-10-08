@@ -2,27 +2,42 @@
 
 """Public Python interface for Ocura OSS."""
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
-from ocura_oss.api import Initialization, branch, compare, initialize, run, run_demo, verify
+from ocura_oss.api import (
+    Initialization,
+    branch,
+    compare,
+    initialize,
+    recover,
+    run,
+    run_demo,
+    verify,
+)
 from ocura_oss.demo import DemoError, DemoReport, DemoStep
 from ocura_oss.model import (
     Atom,
+    Attempt,
+    AttemptState,
     ChildComparison,
     Chokepoint,
     ComparisonResult,
     ComparisonState,
     Den,
     Outcome,
+    OutputCapture,
     ParameterDelta,
     Pathway,
+    RecoveryAction,
     RunSummary,
 )
 from ocura_oss.runner import RunExecution
-from ocura_oss.store import StateVerification, Store, StoreError
+from ocura_oss.store import RecoveredAttempt, StateVerification, Store, StoreError
 
 __all__ = (
     "Atom",
+    "Attempt",
+    "AttemptState",
     "ChildComparison",
     "Chokepoint",
     "ComparisonResult",
@@ -33,8 +48,11 @@ __all__ = (
     "Den",
     "Initialization",
     "Outcome",
+    "OutputCapture",
     "ParameterDelta",
     "Pathway",
+    "RecoveredAttempt",
+    "RecoveryAction",
     "RunExecution",
     "RunSummary",
     "StateVerification",
@@ -44,6 +62,7 @@ __all__ = (
     "branch",
     "compare",
     "initialize",
+    "recover",
     "run",
     "run_demo",
     "verify",

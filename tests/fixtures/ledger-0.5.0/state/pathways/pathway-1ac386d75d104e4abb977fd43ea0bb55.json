@@ -1,0 +1,19 @@
+{
+  "schema_version": 2,
+  "kind": "pathway",
+  "payload": {
+    "id": "pathway-1ac386d75d104e4abb977fd43ea0bb55",
+    "den_id": "den-13d7ee10f1134fdfacbc6baa7eb34084",
+    "created_at": "2026-10-07T23:31:45.492560+00:00",
+    "parent_pathway_id": "pathway-c6132f322f6d463ab8b7876c695eb1e9",
+    "source_chokepoint_id": "chokepoint-1592911372f143208bfd75af9a5c83a5",
+    "reason": "try batch 4",
+    "parameters": {
+      "batch": "4"
+    }
+  },
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "119301aa2e0e7fd3e345c5917ef3b60248ca3946205a68e280d24808be66bc95"
+  }
+}

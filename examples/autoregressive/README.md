@@ -1,6 +1,6 @@
 # Small autoregressive experiment
 
-Version 0.4.0.
+Version 0.5.0.
 
 Train a character-level next-token model with **PyTorch** or **JAX**, either directly
 or inside a **Ray Core task**. Ocura OSS records the baseline, the reason for a
@@ -89,7 +89,7 @@ ocura-oss compare --root ./ar-pytorch --json
 ocura-oss verify --root ./ar-pytorch --json
 ```
 
-Reporting needs only Ocura OSS 0.4.0 or later and the standard library. It verifies
+Reporting needs only Ocura OSS 0.5.0 or later and the standard library. It verifies
 the saved state, reads each run's stdout through `Store.read_verified_log()` so the
 consumed bytes match their recorded size and digest, and checks that reported
 settings match the recorded labels. It then
