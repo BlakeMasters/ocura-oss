@@ -315,7 +315,7 @@ Recheck every state record and every log referenced by a recorded run.
 | Name | Type | Default | Description |
 | --- | --- | --- | --- |
 | `root` | path-like, string, or None | `None` | Project root containing initialized state |
-| `against` | iterable of strings, or None | `None` | Manifest lines retained from an earlier verification; each must still be present unchanged. Blank lines and lines starting with `#` are skipped |
+| `against` | iterable of strings, or None | `None` | Manifest lines retained from an earlier verification; each must still be present unchanged. Blank lines and lines starting with `#` are skipped; a manifest left with no entries is an error |
 
 #### Returns
 
@@ -325,7 +325,7 @@ Recheck every state record and every log referenced by a recorded run.
 
 | Exception | Condition |
 | --- | --- |
-| `StoreError` | Initialized state is absent; the den record is missing, unreadable, malformed, or unverifiable; or an `against` entry is malformed |
+| `StoreError` | Initialized state is absent; the den record is missing, unreadable, malformed, or unverifiable; or `against` has a malformed entry or lists no records |
 
 Problems in other records and logs are normally collected in the returned report instead of raised.
 

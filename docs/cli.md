@@ -448,7 +448,7 @@ Verification establishes consistency among local records and logs. It does not e
 | Status | Meaning |
 | --- | --- |
 | 0 | No verification problems were found |
-| 2 | State was missing, unreadable, malformed, inconsistent, or failed verification; or the `--against` file was unreadable or malformed |
+| 2 | State was missing, unreadable, malformed, inconsistent, or failed verification; or the `--against` file was unreadable, malformed, or listed no records |
 
 ## `manifest`
 

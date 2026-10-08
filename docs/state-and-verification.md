@@ -171,7 +171,7 @@ ocura-oss manifest > ../trusted/experiment.manifest
 ocura-oss verify --against ../trusted/experiment.manifest
 ```
 
-Every retained entry must still be present with the same checksum. Records added since are allowed, so a manifest stays useful while work continues. A rewritten record, a replaced log, or a removed run is reported as a retained record that is missing or was changed.
+Every retained entry must still be present with the same checksum. Records added since are allowed, so a manifest stays useful while work continues. A manifest that lists no records is rejected rather than treated as a pass: it would check nothing, and an empty file is what a failed export leaves behind. A rewritten record, a replaced log, or a removed run is reported as a retained record that is missing or was changed.
 
 The protection is exactly as strong as the place the manifest is kept. A manifest stored beside the ledger can be replaced along with it. The digest alone identifies one exact set of records; it changes with every new run, so use it to confirm that two copies of a finished ledger match, and use the manifest to check a ledger that is still growing.
 
@@ -208,7 +208,7 @@ A run records nothing about its surroundings unless asked. Two options add a `co
 | `run --context`, or `context=True` | `platform`: the operating system name, release, and machine type. `git`: the checked-out revision and whether the work tree differs from it, or null when the project root is not inside a work tree with at least one commit or git is unavailable |
 | `run --context-file PATH`, or `context_files=[...]` | `files`: the size and SHA-256 of each named file, read just before launch. A relative path is resolved against the project root. A file that cannot be read stops the run before the command launches |
 
-The work tree is `dirty` when it has modified or untracked files other than `.ocura-oss/` itself. Reading git state runs `git` twice in the project root; that is the only extra process, and only with `--context`.
+The work tree is `dirty` when it has modified or untracked files other than `.ocura-oss/` itself. Untracked files and changes inside submodules count whatever the user's or repository's git settings say about showing them. Files matched by ignore rules do not count. Reading git state runs `git` twice in the project root; that is the only extra process, and only with `--context`.
 
 Context is a description, not a guarantee:
 

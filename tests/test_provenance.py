@@ -258,6 +258,25 @@ class ManifestTests(ProvenanceTestCase):
         retained = ["# kept 2026-10-07", "", *ocura_oss.verify(self.root).manifest, "  "]
         self.assertTrue(ocura_oss.verify(self.root, against=retained).ok)
 
+    def test_retained_manifest_without_entries_is_rejected(self):
+        self.rewrite_atom(self.baseline.atom.id, declared_parameters={"batch": "64"})
+        for lines in ([], [""], ["# exported 2026-10-07", "   "]):
+            with self.subTest(lines=lines), self.assertRaises(StoreError) as ctx:
+                ocura_oss.verify(self.root, against=lines)
+            self.assertIn("retained manifest lists no records", str(ctx.exception))
+        self.assertTrue(ocura_oss.verify(self.root).ok, "no manifest at all is still allowed")
+
+    def test_empty_retained_file_from_a_failed_export_is_an_error(self):
+        (self.root / self.baseline.atom.stdout_log).write_bytes(b"changed")
+        retained = Path(self._temporary.name) / "retained.manifest"
+        code, stdout, _stderr = self.invoke("manifest")
+        self.assertEqual((code, stdout), (2, ""))
+        retained.write_text(stdout, "utf-8")
+
+        code, stdout, stderr = self.invoke("verify", "--json", "--against", str(retained))
+        self.assertEqual((code, stdout), (2, ""))
+        self.assertIn("error: retained manifest lists no records", stderr)
+
     def test_malformed_retained_entries_are_rejected(self):
         den = self.store.load_den().id
         digest = "0" * 64
@@ -381,7 +400,7 @@ class ContextTests(ProvenanceTestCase):
         self.assertIsNotNone(atom.context.platform)
 
     def test_unexpected_git_output_is_not_recorded_as_a_revision(self):
-        completed = subprocess.CompletedProcess([], 0, stdout="not a revision\n", stderr="")
+        completed = subprocess.CompletedProcess([], 0, stdout=b"not a revision\n", stderr=b"")
         with mock.patch.object(context.subprocess, "run", return_value=completed):
             atom = self.run_plain(context=True)
         self.assertIsNone(atom.context.git_revision)
@@ -409,6 +428,60 @@ class ContextTests(ProvenanceTestCase):
         self.git("checkout", "--quiet", "--", "train.py")
         (self.root / "notes.txt").write_text("untracked\n", "utf-8")
         self.assertIs(self.run_plain(context=True).context.git_dirty, True)
+
+    def commit_one_file(self):
+        self.git("init", "--quiet")
+        (self.root / "train.py").write_text("print('v1')\n", "utf-8")
+        self.git("add", "train.py")
+        self.git("commit", "--quiet", "-m", "first")
+
+    @unittest.skipUnless(GIT, "requires git")
+    def test_untracked_files_count_even_when_git_is_configured_to_hide_them(self):
+        self.commit_one_file()
+        self.git("config", "status.showUntrackedFiles", "no")
+        self.assertIs(self.run_plain(context=True).context.git_dirty, False)
+        (self.root / "input.csv").write_text("an input git was told not to show\n", "utf-8")
+        self.assertIs(self.run_plain(context=True).context.git_dirty, True)
+
+    @unittest.skipUnless(GIT, "requires git")
+    def test_ignored_files_do_not_count_as_dirty(self):
+        self.commit_one_file()
+        (self.root / ".gitignore").write_text("*.cache\n", "utf-8")
+        self.git("add", ".gitignore")
+        self.git("commit", "--quiet", "-m", "ignore caches")
+        (self.root / "data.cache").write_text("ignored\n", "utf-8")
+        self.assertIs(self.run_plain(context=True).context.git_dirty, False)
+
+    @unittest.skipUnless(GIT, "requires git")
+    def test_file_names_outside_the_platform_encoding_do_not_stop_capture(self):
+        self.commit_one_file()
+        # With quoting off, git prints these UTF-8 bytes as they are. Several of
+        # them are undefined in the Windows default code page.
+        self.git("config", "core.quotePath", "false")
+        (self.root / "\u0141\u00f3d\u017a \u6771\u4eac.txt").write_text("untracked\n", "utf-8")
+        atom = self.run_plain(context=True)
+        self.assertIs(atom.outcome, model.Outcome.PASSED)
+        self.assertIs(atom.context.git_dirty, True)
+        self.assertEqual(len(atom.context.git_revision), 40)
+
+    def test_git_output_is_never_decoded_as_text(self):
+        revision = b"a" * 40 + b"\n"
+        status = b"?? \x81\x8d\x8f\x90\x9d\xff.txt\n"
+        completed = [
+            subprocess.CompletedProcess([], 0, stdout=revision, stderr=b""),
+            subprocess.CompletedProcess([], 0, stdout=status, stderr=b""),
+        ]
+        with mock.patch.object(context.subprocess, "run", side_effect=completed) as run:
+            atom = self.run_plain(context=True)
+        self.assertEqual(atom.context.git_revision, "a" * 40)
+        self.assertIs(atom.context.git_dirty, True)
+        for call in run.call_args_list:
+            self.assertNotIn("text", call.kwargs)
+            self.assertNotIn("encoding", call.kwargs)
+            self.assertEqual(call.kwargs["env"]["GIT_OPTIONAL_LOCKS"], "0")
+        status_arguments = run.call_args_list[1].args[0]
+        self.assertIn("--untracked-files=normal", status_arguments)
+        self.assertIn("--ignore-submodules=none", status_arguments)
 
     @unittest.skipUnless(GIT, "requires git")
     def test_repository_without_commits_has_no_git_state(self):

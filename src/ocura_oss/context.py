@@ -59,28 +59,46 @@ def capture(
 
 def _git_state(root: Path) -> tuple[str | None, bool | None]:
     """Return the checked-out revision and whether the work tree differs from it."""
-    revision = _git(root, "rev-parse", "--verify", "HEAD")
+    head = _git(root, "rev-parse", "--verify", "HEAD")
+    revision = None if head is None else head.strip().decode("ascii", "replace")
     if revision is None or len(revision) not in (40, 64) or set(revision) - _HEX_DIGITS:
         return None, None
-    # The ledger itself changes with every run and is not part of the workload.
-    status = _git(root, "status", "--porcelain", "--", ":/", f":(exclude){STATE_DIR_NAME}")
+    status = _git(
+        root,
+        "status",
+        "--porcelain",
+        # Stated outright, because a user or repository setting can hide either
+        # kind of change and make unrecorded inputs look clean.
+        "--untracked-files=normal",
+        "--ignore-submodules=none",
+        "--",
+        ":/",
+        # The ledger itself changes with every run and is not part of the workload.
+        f":(exclude){STATE_DIR_NAME}",
+    )
     if status is None:
         return None, None
-    return revision, bool(status)
+    return revision, bool(status.strip())
 
 
-def _git(root: Path, *arguments: str) -> str | None:
+def _git(root: Path, *arguments: str) -> bytes | None:
+    """Run git and return its output undecoded, or ``None`` if it failed.
+
+    Git prints paths in the repository's own encoding, which need not be one
+    this platform's default codec can decode, so the output stays bytes.
+    """
     try:
         completed = subprocess.run(  # noqa: S603 - fixed argv, shell=False
             ["git", *arguments],
             cwd=str(root),
             capture_output=True,
-            text=True,
             timeout=_GIT_TIMEOUT,
             check=False,
+            # Reading state must not write to the repository's index.
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
         )
     except (OSError, subprocess.SubprocessError):
         return None
     if completed.returncode != 0:
         return None
-    return completed.stdout.strip()
+    return completed.stdout

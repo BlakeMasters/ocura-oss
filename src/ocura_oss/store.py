@@ -836,9 +836,15 @@ def _manifest_line(kind: str, record_id: str, payload: dict) -> str:
 
 
 def _parse_manifest(lines: Iterable[str] | None) -> list[str]:
-    """Normalize retained manifest lines; blank lines and ``#`` comments are skipped."""
+    """Normalize retained manifest lines; blank lines and ``#`` comments are skipped.
+
+    A manifest that was supplied but lists nothing is an error. It would check
+    no record, and an empty file is what a failed export leaves behind.
+    """
+    if lines is None:
+        return []
     entries: list[str] = []
-    for raw in lines or ():
+    for raw in lines:
         line = raw.strip() if isinstance(raw, str) else ""
         if not line or line.startswith("#"):
             continue
@@ -851,6 +857,8 @@ def _parse_manifest(lines: Iterable[str] | None) -> list[str]:
         ):
             raise StoreError(f"malformed manifest entry: {line!r}")
         entries.append(line)
+    if not entries:
+        raise StoreError("retained manifest lists no records, so it cannot check any")
     return entries
 
 
