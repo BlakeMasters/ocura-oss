@@ -25,6 +25,16 @@ The demo runs the complete workflow and retains a new directory for inspection.
 Its destination must not already exist. To install a repository checkout instead,
 run `python -m pip install .` from its root.
 
+## Upgrading from 0.4
+
+**Version 0.5 cannot read a `.ocura-oss/` directory written by 0.4 or earlier, and does
+not convert one.** Commands pointed at old state stop with exit status 2 and say so;
+the directory is left untouched. To keep working with existing records, stay on 0.4
+for that project (`python -m pip install "ocura-oss<0.5"`). To record with 0.5, move
+the old directory aside and run `ocura-oss init`. The
+[upgrade notes](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/state-and-verification.md#upgrading-from-04)
+cover each case.
+
 ## Compare two runs
 
 ```console

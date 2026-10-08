@@ -215,6 +215,9 @@ class Store:
         ``abandoned`` once that process has stopped without finalizing it.
         Finalized attempts are atoms and are not listed.
         """
+        # Reading the den first rejects state this version cannot read, even
+        # when no attempt record is present to reveal it.
+        self.load_den()
         problems: list[tuple[str, str]] = []
         attempts = self._scan_attempts(problems)
         if problems:
@@ -239,6 +242,7 @@ class Store:
         outlived its recorder can keep writing to logs measured here.
         """
         self.require()
+        self.load_den()
         clock = now or model.utc_now
         recovered: list[RecoveredAttempt] = []
         if not self.attempts_dir.is_dir():
@@ -599,8 +603,9 @@ class Store:
             raise StoreError(f"malformed {expected_kind} record {path.name}: bad schema version")
         if schema_version != model.SCHEMA_VERSION:
             hint = (
-                "; Ocura OSS 0.4 and earlier wrote it, and this version reads schema"
-                f" {model.SCHEMA_VERSION} only"
+                "; Ocura OSS 0.4 and earlier wrote this state, and this version cannot"
+                ' read or convert it. Keep using "ocura-oss<0.5" for it, or move'
+                f" {STATE_DIR_NAME} aside and run `ocura-oss init`"
                 if schema_version == 1
                 else ""
             )

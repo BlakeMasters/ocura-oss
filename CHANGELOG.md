@@ -5,8 +5,10 @@ This file records user-visible changes to Ocura OSS.
 ## 0.5.0 - Unreleased
 
 - **Breaking:** change the record format to schema version 2. State written by 0.4 and
-  earlier is rejected with an error naming its version; there is no migration, so start
-  a new `.ocura-oss/` directory. `Atom` log fields, `finished_at`, and `duration_seconds`
+  earlier is rejected with exit status 2 and left untouched; there is no migration. To
+  keep using existing records, stay on 0.4 for that project (`ocura-oss<0.5`). To record
+  with 0.5, move the old `.ocura-oss/` aside and run `ocura-oss init`. See "Upgrading
+  from 0.4" in `docs/state-and-verification.md`. `Atom` log fields, `finished_at`, and `duration_seconds`
   may now be `None`, and `RunSummary.duration_seconds` may be `None`.
 - Journal each run under `.ocura-oss/attempts/` before its command launches. An attempt
   whose recording process is interrupted twice or killed stays visible instead of leaving

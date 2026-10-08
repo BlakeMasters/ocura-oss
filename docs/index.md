@@ -14,8 +14,12 @@ provides JSON output throughout the workflow; the Python API returns typed resul
 
 ## New in 0.5.0
 
-Version 0.5.0 changes the record format to schema 2. It does not read state written
-by 0.4 or earlier; start a new `.ocura-oss/` directory.
+**Version 0.5.0 changes the record format to schema 2. It cannot read or convert a
+`.ocura-oss/` directory written by 0.4 or earlier.** Commands pointed at old state stop
+with exit status 2 and leave it untouched. Stay on 0.4 for a project whose records you
+still need (`python -m pip install "ocura-oss<0.5"`), or move the old directory aside
+and run `ocura-oss init`. See [upgrading from 0.4](state-and-verification.md#upgrading-from-04)
+before you upgrade.
 
 - **Unfinished runs stay visible.** Each run is journaled before its command starts.
   If the recording process is interrupted twice or killed, `ocura-oss attempts` shows
