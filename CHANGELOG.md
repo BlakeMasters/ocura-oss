@@ -2,6 +2,13 @@
 
 This file records user-visible changes to Ocura OSS.
 
+## 0.6.0 - Unreleased
+
+- **License:** Ocura OSS is now released under the Apache License 2.0. Versions 0.5.0
+  and earlier remain under MPL-2.0. Contributions are accepted under Apache-2.0.
+- The record format is unchanged. This release reads and extends state written by
+  0.5.0.
+
 ## 0.5.0 - 2026-10-07
 
 - **Breaking:** change the record format to schema version 2. State written by 0.4 and

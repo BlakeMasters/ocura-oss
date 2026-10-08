@@ -1,6 +1,6 @@
 # Scripts and AI agents
 
-Version 0.5.0.
+Version 0.6.0.
 
 Ocura OSS can be called from a shell, a Python program, or an AI agent's existing
 command tool. Use it when you want a durable record connecting a baseline to later

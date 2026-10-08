@@ -1,6 +1,6 @@
 # Ocura OSS
 
-Version 0.5.0.
+Version 0.6.0.
 
 A local execution ledger for recording, branching, and comparing command runs.
 
@@ -25,6 +25,13 @@ especially for local development:
   documented exit code, so an AI agent with a shell can set it up and run the
   whole workflow.
 
+## New in 0.6.0
+
+- **Apache-2.0 license.** Version 0.6.0 and later are released under the Apache
+  License 2.0. Versions 0.5.0 and earlier remain under MPL-2.0.
+
+The record format is unchanged: 0.6.0 reads and extends state written by 0.5.0.
+
 ## New in 0.5.0
 
 - **Unfinished runs stay visible.** Each run is journaled before its command starts.
@@ -48,8 +55,8 @@ The core runtime still uses only the standard library. See
 [state and verification](state-and-verification.md) for the format, attempts,
 concurrent use, and the limits of each option.
 
-**Upgrading from 0.4:** version 0.5.0 changes the record format to schema 2. It cannot
-read or convert a `.ocura-oss/` directory written by 0.4 or earlier. Commands pointed
+**Upgrading from 0.4:** version 0.5.0 changed the record format to schema 2. Versions
+0.5.0 and later cannot read or convert a `.ocura-oss/` directory written by 0.4 or earlier. Commands pointed
 at old state stop with exit status 2 and leave it untouched. Stay on 0.4 for a project
 whose records you still need (`python -m pip install "ocura-oss<0.5"`), or move the old
 directory aside and run `ocura-oss init`. See
@@ -172,7 +179,8 @@ authenticate authorship or prevent a writer from replacing records and checksums
 
 ## Project status
 
-Ocura OSS is research software under [MPL-2.0](../LICENSE). The 0.x interface and record
+Ocura OSS is research software under the [Apache License 2.0](../LICENSE).
+Versions 0.5.0 and earlier were released under MPL-2.0. The 0.x interface and record
 format may change before 1.0, and there is no production support commitment.
 
 Bug reports and focused pull requests are welcome. See [Contributing](../CONTRIBUTING.md)

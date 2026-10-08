@@ -1,8 +1,8 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 
 """Public Python interface for Ocura OSS."""
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 from ocura_oss.api import (
     Initialization,

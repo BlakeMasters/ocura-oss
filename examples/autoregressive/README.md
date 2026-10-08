@@ -1,6 +1,6 @@
 # Small autoregressive experiment
 
-Version 0.5.0.
+Version 0.6.0.
 
 Train a character-level next-token model with **PyTorch** or **JAX**, either directly
 or inside a **Ray Core task**. Ocura OSS records the baseline, the reason for a

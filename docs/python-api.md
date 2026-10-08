@@ -1,6 +1,6 @@
 # Python API reference
 
-Version 0.5.0.
+Version 0.6.0.
 
 The `ocura_oss` package exposes typed workflow functions, read-oriented state access, frozen result and record types, enums, and public exceptions.
 
@@ -1489,7 +1489,7 @@ The destination is retained when it was created before the failure.
 ocura_oss.__version__: str
 ```
 
-Installed package version. Version 0.5.0 reports `"0.5.0"`.
+Installed package version. Version 0.6.0 reports `"0.6.0"`.
 
 ## Typing
 

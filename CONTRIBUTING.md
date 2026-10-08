@@ -52,7 +52,7 @@ The core package stays dependency-free.
 
 A pull request should explain what changed, why the change belongs in this research package, and how it was verified. Keep unrelated cleanup separate so reviewers can evaluate the behavior directly.
 
-Contributions accepted into this repository are released under MPL-2.0. Only submit work you have the right to contribute.
+Contributions accepted into this repository are released under the Apache License 2.0. Only submit work you have the right to contribute.
 
 ## Releases
 
