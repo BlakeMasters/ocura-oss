@@ -16,7 +16,7 @@ Ocura OSS is built to just work. It aims to be the easiest way to start recordin
 runs in a new project, especially for local development:
 
 - **Dependency free.** It needs Python 3.11 or later and nothing else. Installing
-  it adds no other packages, so it cannot conflict with what your project uses.
+  it adds no runtime dependencies to your project.
 - **Easy setup.** `pip install ocura-oss`, then `ocura-oss init`. There is no
   server, database, account, or configuration file. Every command accepts `--json`
   and returns a documented exit code, so an AI agent with a shell can do the setup
@@ -26,8 +26,8 @@ runs in a new project, especially for local development:
   of it and change it to fit your workflow, and the Apache-2.0 license does not
   require you to publish your changes.
 
-It is just as easy to remove: everything it writes is inside `.ocura-oss/` in your
-project, so deleting that directory removes all of it.
+To remove the ledger, delete `.ocura-oss/` in your project. That directory holds
+all ledger records and captured logs.
 
 ## Install and try
 
