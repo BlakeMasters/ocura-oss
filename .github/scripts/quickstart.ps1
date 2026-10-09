@@ -31,7 +31,7 @@ if ($printed -ne "4") { throw "--substitute passed '$printed', expected '4'" }
 ocura-oss verify --json > verify.json
 Assert-Step "verify"
 if ((Read-Json verify.json).status -ne "ok") { throw "verify did not report ok" }
-ocura-oss compare --json --from $chokepoint > compare.json
+ocura-oss compare --json > compare.json
 Assert-Step "compare"
 if ((Read-Json compare.json).state -ne "ready") { throw "compare is not ready" }
 # The child run declared nothing: its count=2 label comes from the branch.
