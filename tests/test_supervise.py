@@ -13,8 +13,9 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from ocura_oss import supervise
+from ocura_oss import api, supervise
 from ocura_oss.store import Store
 
 WAIT_SECONDS = 30.0
@@ -113,13 +114,14 @@ class StopRequestHandlerTests(unittest.TestCase):
         self.assertNotIn(signal.default_int_handler, seen)
 
     def test_a_launch_hook_is_used_only_on_linux_and_never_beside_other_threads(self):
-        expected = ["preexec_fn"] if sys.platform == "linux" else []
-        self.assertEqual(list(supervise.Tether().popen_options()), expected)
+        self.assertEqual(
+            "preexec_fn" in supervise.Tether().popen_options(), sys.platform == "linux"
+        )
         beside = []
         thread = threading.Thread(target=lambda: beside.append(supervise.Tether().popen_options()))
         thread.start()
         thread.join()
-        self.assertEqual(beside, [{}])
+        self.assertNotIn("preexec_fn", beside[0])
 
 
 class RecorderTests(unittest.TestCase):
@@ -134,10 +136,18 @@ class RecorderTests(unittest.TestCase):
         self.pid_file = Path(self._temporary.name) / "beat.pid"
         self.addCleanup(self.stop_started_beat)
 
-    def record(self, script, *arguments, **options):
+    def record(self, script, *arguments, setup="", **options):
         """Start `ocura-oss run` on a script in its own process and return that recorder."""
+        recorder_command = [sys.executable, "-m", "ocura_oss"]
+        if setup:
+            recorder_command = [
+                sys.executable,
+                "-c",
+                setup + "\nfrom ocura_oss.cli import main; raise SystemExit(main(sys.argv[1:]))",
+            ]
         recorder = subprocess.Popen(
-            [sys.executable, "-m", "ocura_oss", "run", "--root", str(self.root), "--json", "--"]
+            recorder_command
+            + ["run", "--root", str(self.root), "--json", "--"]
             + [sys.executable, "-c", script, *(str(argument) for argument in arguments)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -196,7 +206,22 @@ class RecorderTests(unittest.TestCase):
         # tests/test_attempts.py covers the abandoned attempt this leaves and its recovery.
         if sys.platform == "win32":
             # A job also covers what the command started; Linux covers the command itself.
-            recorder = self.record(START_BEAT, self.beat, self.pid_file, "stay")
+            ready = self.root / "attached"
+            setup = f"""
+import sys, time
+from pathlib import Path
+from ocura_oss import supervise
+attach = supervise.Tether.attach
+def delayed(self, process):
+    deadline = time.monotonic() + 0.5
+    while not Path({str(self.pid_file)!r}).exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    attach(self, process)
+    Path({str(ready)!r}).touch()
+supervise.Tether.attach = delayed
+"""
+            recorder = self.record(START_BEAT, self.beat, self.pid_file, "stay", setup=setup)
+            wait_until(ready.exists, "the delayed job attachment completes")
         else:
             recorder = self.record(BEAT, self.beat)
         recorder.kill()
@@ -211,6 +236,54 @@ class RecorderTests(unittest.TestCase):
         # The recorder has exited; the beat its command started must still be growing.
         before = size(self.beat)
         wait_until(lambda: size(self.beat) > before, "the started beat is still alive")
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows suspended launch fallback")
+    def test_unavailable_windows_supervision_still_runs_the_command_once(self):
+        for helper, failure in (
+            ("_job_for", {"return_value": None}),
+            ("_resume", {"side_effect": OSError("unavailable")}),
+        ):
+            with self.subTest(helper=helper), mock.patch.object(supervise, helper, **failure):
+                self.beat.unlink(missing_ok=True)
+                result = api.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import sys; open(sys.argv[1], 'ab').write(b'.')",
+                        str(self.beat),
+                    ],
+                    root=self.root,
+                )
+                self.assertEqual(result.atom.outcome.value, "passed")
+                self.assertEqual(self.beat.read_bytes(), b".")
+                self.assertFalse(self.store.list_attempts())
+                self.assertTrue(self.store.verify_state().ok)
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux pre-exec hook fallback")
+    def test_a_run_in_a_subinterpreter_finishes_and_verifies(self):
+        try:
+            import _interpreters as interpreters
+        except ImportError:
+            import _xxsubinterpreters as interpreters
+
+            interpreter = interpreters.create(isolated=False)
+        else:
+            interpreter = interpreters.create("legacy")
+        self.addCleanup(interpreters.destroy, interpreter)
+        error = interpreters.run_string(
+            interpreter,
+            f"""
+import sys
+sys.path.insert(0, {str(Path(supervise.__file__).resolve().parents[1])!r})
+from ocura_oss import run, verify, Store
+root = {str(self.root)!r}
+result = run([sys.executable, '-c', 'pass'], root=root)
+assert result.atom.outcome.value == 'passed', result.atom.outcome
+assert verify(root).ok
+assert not Store(root).list_attempts()
+""",
+        )
+        self.assertIsNone(error, str(error))
 
 
 if __name__ == "__main__":

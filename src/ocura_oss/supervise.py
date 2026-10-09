@@ -22,7 +22,7 @@ import signal
 import subprocess
 import sys
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
 _STOP_SIGNALS = tuple(
@@ -57,6 +57,20 @@ if sys.platform == "win32":
     _EXTENDED_LIMIT_INFORMATION = 9
     _BREAKAWAY_OK = 0x0800
     _KILL_ON_JOB_CLOSE = 0x2000
+    _CREATE_SUSPENDED = 0x0004
+    _SNAP_THREADS = 0x0004
+    _THREAD_SUSPEND_RESUME = 0x0002
+
+    class _ThreadEntry(ctypes.Structure):
+        _fields_ = (
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ThreadID", wintypes.DWORD),
+            ("th32OwnerProcessID", wintypes.DWORD),
+            ("tpBasePri", wintypes.LONG),
+            ("tpDeltaPri", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD),
+        )
 
     class _BasicLimits(ctypes.Structure):
         _fields_ = (
@@ -95,6 +109,41 @@ if sys.platform == "win32":
     _kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
     _kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
     _kernel32.CloseHandle.restype = wintypes.BOOL
+    _kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+    _kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    _kernel32.Thread32First.argtypes = (wintypes.HANDLE, ctypes.POINTER(_ThreadEntry))
+    _kernel32.Thread32First.restype = wintypes.BOOL
+    _kernel32.Thread32Next.argtypes = _kernel32.Thread32First.argtypes
+    _kernel32.Thread32Next.restype = wintypes.BOOL
+    _kernel32.OpenThread.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    _kernel32.OpenThread.restype = wintypes.HANDLE
+    _kernel32.ResumeThread.argtypes = (wintypes.HANDLE,)
+    _kernel32.ResumeThread.restype = wintypes.DWORD
+
+    def _resume(process: subprocess.Popen) -> None:
+        """Resume the initial thread, whose handle Popen closes after creation."""
+        snapshot = _kernel32.CreateToolhelp32Snapshot(_SNAP_THREADS, 0)
+        if snapshot == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            entry = _ThreadEntry()
+            entry.dwSize = ctypes.sizeof(entry)
+            found = _kernel32.Thread32First(snapshot, ctypes.byref(entry))
+            while found:
+                if entry.th32OwnerProcessID == process.pid:
+                    thread = _kernel32.OpenThread(_THREAD_SUSPEND_RESUME, False, entry.th32ThreadID)
+                    if not thread:
+                        raise ctypes.WinError(ctypes.get_last_error())
+                    try:
+                        if _kernel32.ResumeThread(thread) == 0xFFFFFFFF:
+                            raise ctypes.WinError(ctypes.get_last_error())
+                    finally:
+                        _kernel32.CloseHandle(thread)
+                    return
+                found = _kernel32.Thread32Next(snapshot, ctypes.byref(entry))
+            raise OSError("cannot find the suspended command's initial thread")
+        finally:
+            _kernel32.CloseHandle(snapshot)
 
     def _set_limits(job: int, flags: int) -> bool:
         limits = _ExtendedLimits()
@@ -163,16 +212,48 @@ class Tether:
 
     def popen_options(self) -> dict[str, Any]:
         """Return extra ``subprocess.Popen`` arguments for the launch."""
+        if sys.platform == "win32":
+            return {"creationflags": _CREATE_SUSPENDED}
         if sys.platform == "linux":
             hook = _die_with_recorder()
             if hook is not None:
                 return {"preexec_fn": hook}
         return {}
 
+    def launch(self, command: Sequence[str], **options: Any) -> subprocess.Popen:
+        """Launch with supervision, falling back only where it is unavailable."""
+        extra = self.popen_options()
+        try:
+            process = subprocess.Popen(command, **options, **extra)  # noqa: S603
+        except RuntimeError as exc:
+            if "preexec_fn" not in extra or str(exc) != (
+                "preexec_fn not supported within subinterpreters"
+            ):
+                raise
+            process = subprocess.Popen(command, **options)  # noqa: S603
+        try:
+            self.attach(process)
+        except OSError:
+            if sys.platform != "win32":
+                raise
+            # attach stopped the suspended process before any command code ran.
+            process = subprocess.Popen(command, **options)  # noqa: S603
+        return process
+
     def attach(self, process: subprocess.Popen) -> None:
         """Take hold of a command that has just been launched."""
         if sys.platform == "win32":
-            self._job = _job_for(process)
+            try:
+                self._job = _job_for(process)
+                _resume(process)
+            except BaseException:
+                # A failed or interrupted setup must not leave a suspended command.
+                self.release(command_finished=False)
+                with contextlib.suppress(OSError):
+                    process.kill()
+                with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+                    process.wait(timeout=5)
+                raise
 
     def release(self, *, command_finished: bool) -> None:
         """Let go of the command.

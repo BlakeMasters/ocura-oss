@@ -23,7 +23,7 @@ runs in a new project, especially for local development:
   server, database, account, or configuration file. Every command accepts `--json`
   and returns a documented exit code, so an AI agent with a shell can do the setup
   and run the whole workflow.
-- **Easy to modify.** The whole package is twelve modules, about 4,100 lines of
+- **Easy to modify.** The whole package is twelve modules, about 4,200 lines of
   typed Python, and its records are plain JSON files. You or an agent can read all
   of it and change it to fit your workflow, and the Apache-2.0 license does not
   require you to publish your changes.

@@ -132,6 +132,8 @@ A recorder that is killed outright records nothing, and its attempt becomes `aba
 
 On Linux this applies when the recording process has a single thread as it launches the command, which is always true of `ocura-oss run`. A command that finishes on its own is not affected on any system: processes it left running stay running.
 
+These operating-system mechanisms are best effort: a command still runs when one is unavailable. On Linux the kernel request is also skipped in hosts that cannot use a pre-exec hook, such as Python subinterpreters.
+
 Limits:
 
 - Where a command or a process it started outlives a killed recorder, it can keep writing to its logs. Recover only after it has stopped; otherwise later verification reports its log as changed.

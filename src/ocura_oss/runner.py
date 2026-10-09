@@ -223,17 +223,15 @@ def _execute(
 
     tether = supervise.Tether()
     try:
-        process = subprocess.Popen(  # noqa: S603 - argv list, shell=False
+        process = tether.launch(
             list(tokens),
             cwd=str(store.root),
             stdout=subprocess.PIPE if mirror else (stdout_handle or subprocess.DEVNULL),
             stderr=subprocess.PIPE if mirror else (stderr_handle or subprocess.DEVNULL),
             shell=False,
-            **tether.popen_options(),
         )
     except (OSError, ValueError) as exc:
         return None, categorize_launch_error(exc), False
-    tether.attach(process)
 
     interrupted = False
     finished = False
