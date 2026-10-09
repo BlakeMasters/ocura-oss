@@ -177,7 +177,7 @@ The returned atom's `declared_parameters` are the pathway's effective parameters
 
 `context` and `context_files` fill the returned atom's `context` with a `RunContext`; it is `None` when neither is used. Nothing is queried, executed, or read for context otherwise. See [optional launch context](state-and-verification.md#optional-launch-context) for what is recorded and what it does not establish.
 
-The attempt is journaled under `.ocura-oss/attempts/` before the command launches. One atom and one branchable terminal chokepoint are written after the command ends, and the journal entry is then removed. A second Ctrl+C, or a killed process, leaves the entry in place; `recover()` closes it. Several processes may call `run()` against one root at the same time.
+The attempt is journaled under `.ocura-oss/attempts/` before the command launches. One atom and one branchable terminal chokepoint are written after the command ends, and the journal entry is then removed. A second Ctrl+C, or a killed process, leaves the entry in place; `recover()` closes it. `run()` installs no signal handlers, and what happens to the command when the calling process is killed depends on the operating system; see [when the recorder stops](state-and-verification.md#when-the-recorder-stops). Several processes may call `run()` against one root at the same time.
 
 The host machine, network, and process tree form the execution context. The trust model is trusted, same-owner local work.
 
@@ -397,7 +397,7 @@ What recovery writes depends on how far the recorder got:
 
 An abandoned atom has `None` for `finished_at`, `duration_seconds`, `return_code`, and `launch_error_category`. Output captured before the recorder stopped is retained and measured, so it verifies afterward.
 
-Attempts that a live process is still recording are left alone, so recovery is safe while other runs are in flight. Call it only after the abandoned command itself has stopped: Ocura OSS does not stop a command whose recorder died, and one that is still running can keep writing to logs that recovery has measured.
+Attempts that a live process is still recording are left alone, so recovery is safe while other runs are in flight. Call it only after the abandoned command itself has stopped: a command that outlived its recorder can keep writing to logs that recovery has measured.
 
 #### Example
 

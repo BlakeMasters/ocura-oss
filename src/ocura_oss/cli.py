@@ -10,7 +10,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from ocura_oss import branching, demo, model, runner, store
+from ocura_oss import branching, demo, model, runner, store, supervise
 from ocura_oss.model import ModelError
 from ocura_oss.store import StoreError
 
@@ -111,8 +111,10 @@ def _build_parser() -> argparse.ArgumentParser:
             " also records its pathway's parameters, so a run on a branch does"
             " not repeat them.\n"
             "While the command runs, its output streams to your terminal and is"
-            " recorded under .ocura-oss/logs/. If you press Ctrl+C, the partial"
-            " attempt is still recorded as interrupted evidence; a second"
+            " recorded under .ocura-oss/logs/. If you press Ctrl+C, or this"
+            " process is asked to stop (SIGTERM, SIGHUP, or Ctrl+Break), the"
+            " command is stopped and the partial attempt is still recorded as"
+            " interrupted evidence; a second"
             " Ctrl+C exits immediately and leaves the attempt unfinished until"
             " `ocura-oss recover` closes it. With --json, command output"
             " stays in the logs and stdout contains one result object.\n"
@@ -517,18 +519,19 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
     mirror = not (args.quiet or args.json)
     if not args.json:
         print(f"recording under {state.state_dir}")
-    execution = runner.run_command(
-        state,
-        pathway_id=pathway_id,
-        argv=list(command_tail),
-        declared_parameters=declared,
-        mirror=mirror,
-        capture=not args.no_capture,
-        masked_arguments=args.mask_arg,
-        substitute=args.substitute,
-        context=args.context,
-        context_files=args.context_file,
-    )
+    with supervise.stop_requests_interrupt():
+        execution = runner.run_command(
+            state,
+            pathway_id=pathway_id,
+            argv=list(command_tail),
+            declared_parameters=declared,
+            mirror=mirror,
+            capture=not args.no_capture,
+            masked_arguments=args.mask_arg,
+            substitute=args.substitute,
+            context=args.context,
+            context_files=args.context_file,
+        )
     atom = execution.atom
     if args.json:
         _emit_json(

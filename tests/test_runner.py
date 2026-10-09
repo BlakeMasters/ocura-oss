@@ -335,7 +335,7 @@ class InterruptedEvidenceTests(unittest.TestCase):
     def test_keyboard_interrupt_records_interrupted_evidence(self):
         from unittest import mock
 
-        with mock.patch.object(runner.subprocess, "Popen", return_value=_FakeProcess()):
+        with mock.patch.object(runner.supervise.Tether, "launch", return_value=_FakeProcess()):
             execution = runner.run_command(
                 self.store,
                 pathway_id=self.pathway.id,

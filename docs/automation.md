@@ -25,8 +25,9 @@ declaration does both. A program that builds the argument list itself needs no
 quoting; a PowerShell command line must quote the placeholder. Handle nonzero exits: `run` still returns a recorded result for a failed
 command, interruption, or launch failure. See [CLI](cli.md).
 
-If a `run` process is killed before it returns a result, its attempt remains
-unfinished. `attempts --json` lists it, `verify --json` reports it as a problem, and
+To stop a run early, send the `run` process `SIGTERM`, or Ctrl+Break on Windows:
+it stops the command and still returns a recorded `interrupted` result. If a `run`
+process is killed instead, its attempt remains unfinished. `attempts --json` lists it, `verify --json` reports it as a problem, and
 `recover --json` closes it as `abandoned` once the command itself has stopped.
 
 The [autoregressive example](../examples/autoregressive/README.md) is an executable
